@@ -52,3 +52,11 @@ Phase6_Reliability/artifacts/
 Phase7_Evidence/artifacts/
 Phase7_Evidence/artifacts_large_sweep/
 Phase7_Evidence/artifacts_strict_tmp/
+
+# Internal planning/working notes (keep local, do not publish)
+Analysis.md
+DATA.md
+Phases.txt
+run_command.txt
+Dataset/run_command.txt
+Claude_Opinion.md

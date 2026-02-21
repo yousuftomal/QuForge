@@ -48,8 +48,6 @@ flowchart LR
 | `Phase5_ClosedLoop/` | Closed-loop candidate scoring and fab handoff export |
 | `Phase6_Reliability/` | Reliability variant comparisons and stress tests |
 | `Phase7_Evidence/` | Multi-seed evidence hardening, holdout runs, figure generation, and web app |
-| `run_command.txt` | Root command reference |
-| `Analysis.md` | Running project analysis log and final findings |
 
 ## Current Run Snapshot (Latest Strict Rerun)
 
@@ -135,7 +133,6 @@ Important:
 
 See:
 - `Phase4_Coherence/MEASUREMENT_DATA_GUIDE.md`
-- `Analysis.md`
 
 ## Reproducibility
 
@@ -154,15 +151,25 @@ Dataset\.venv310\Scripts\python Dataset\generate_data.py --workdir Dataset --sam
 
 ### Full Paper Stream
 
-Use the "Final paper rerun" block in:
-- `run_command.txt`
-- `Dataset/run_command.txt`
+Run in order:
 
-This includes:
-- strict dataset regeneration,
-- public canonical/mapping rebuild,
-- Phase 1 to Phase 7 reruns,
-- figure packs.
+```powershell
+Dataset\.venv310\Scripts\python Dataset\generate_data.py --workdir Dataset --sampling-mode random --geometry-samples 1200 --junction-samples 10 --target-single-rows 10000 --max-pairs 5000 --gmsh-verbosity 0 --mesh-lc-min-um 30 --mesh-lc-max-um 120 --mesh-optimize-threshold 0.45 --no-palace-fallback
+Dataset\.venv310\Scripts\python Phase4_5_PublicData\build_public_canonical_dataset.py
+Dataset\.venv310\Scripts\python Phase4_5_PublicData\augment_large_raw_sources.py --input-csv Dataset\public_sources\silver\public_measurements_canonical.csv --output-csv Dataset\public_sources\silver\public_measurements_canonical.csv
+Dataset\.venv310\Scripts\python Phase4_5_PublicData\map_public_to_internal.py --max-distance 1.6 --min-confidence 0.30
+Dataset\.venv310\Scripts\python Phase1_Surrogate\train_surrogate.py --n-estimators 250 --max-depth 32
+Dataset\.venv310\Scripts\python Phase2_Embedding\train_phase2_embedding_nn.py
+Dataset\.venv310\Scripts\python Phase2_Embedding\validate_phase2_embedding_nn.py
+Dataset\.venv310\Scripts\python Phase3_InverseDesign\validate_phase3.py --max-queries-per-split 40
+Dataset\.venv310\Scripts\python Phase4_Coherence\train_phase4_coherence.py --label-mode hybrid --measurement-csv Dataset\measurement_dataset_public_bootstrap.csv --measured-weight 1.0 --proxy-weight 1.0
+Dataset\.venv310\Scripts\python Phase4_Coherence\validate_phase4_coherence.py --measurement-csv Dataset\measurement_dataset_public_bootstrap.csv
+Dataset\.venv310\Scripts\python Phase5_ClosedLoop\run_phase5_closed_loop.py
+Dataset\.venv310\Scripts\python Phase6_Reliability\run_phase6_reliability.py
+Dataset\.venv310\Scripts\python Phase7_Evidence\run_phase7_evidence.py --measurement-csv Dataset\measurement_dataset_public_bootstrap.csv --output-dir Phase7_Evidence\artifacts_large_sweep --seeds 42,123,777,1001,1002,1003,1004,1005,1006,1007
+Dataset\.venv310\Scripts\python Phase7_Evidence\generate_publication_figures.py --input-dir Phase7_Evidence\artifacts_large_sweep --output-dir Phase7_Evidence\artifacts_large_sweep\figures
+Dataset\.venv310\Scripts\python Phase7_Evidence\generate_extended_publication_figures.py --phase7-dir Phase7_Evidence\artifacts_large_sweep --phase6-dir Phase6_Reliability\artifacts --phase5-dir Phase5_ClosedLoop\artifacts --single-csv Dataset\final_dataset_single.csv --output-dir Phase7_Evidence\artifacts_large_sweep\figures
+```
 
 ## Environment Notes
 
@@ -173,7 +180,7 @@ This includes:
 
 ## Collaboration Request: Real Lab Measurement Data
 
-We are actively looking for collaboration with labs to improve real-world calibration and transfer.
+We are actively looking for collaboration with labs, and with individual researchers/engineers affiliated with labs, to improve real-world calibration and transfer.
 
 ### What We Need
 
@@ -202,8 +209,12 @@ For details:
 
 ### How to Reach Out
 
-- Open a GitHub issue in this repository titled: `Lab Collaboration - Measured Data`.
-- Include data availability, measurement stack, and intended sharing mode.
+- Email: `yousuf.tomal.0@gmail.com`
+- Required subject line: `QuForge Collaboration - Real Measured Qubit Data - <Lab/Institution>`
+- In the email body, include:
+1. data availability (approximate row count and fields),
+2. measurement stack (device family, readout pipeline, cooldown context),
+3. preferred collaboration mode (public, private, or joint benchmark).
 
 ## License
 
