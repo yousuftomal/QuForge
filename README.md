@@ -2,6 +2,8 @@
 
 QuForge is an end-to-end AI pipeline for superconducting qubit design exploration, reliability-aware candidate ranking, and evidence hardening.
 
+Current design scope: fixed-frequency transmon qubits (and transmon-derived coupled metrics in this pipeline).
+
 It combines:
 - physics-driven synthetic dataset generation,
 - surrogate and embedding models for inverse design,
@@ -20,6 +22,7 @@ This repository is designed for:
 
 It is not currently claiming:
 - fabrication-ready absolute coherence prediction without stronger real measured calibration.
+- direct validity for non-transmon superconducting qubit modalities without dedicated re-calibration and validation.
 
 ## End-to-End Pipeline
 
