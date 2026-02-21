@@ -1,0 +1,54 @@
+# Python cache and build
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+Dataset/.venv310/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.tmp
+
+# Runtime logs
+*.log
+
+# Generated dataset outputs
+Dataset/final_dataset_single.csv
+Dataset/final_dataset_coupled.csv
+Dataset/measurement_dataset.csv
+Dataset/measurement_dataset.report.json
+Dataset/measurement_dataset_public_bootstrap.csv
+Dataset/measurement_dataset_public_bootstrap.report.json
+Dataset/measurement_dataset_public_bootstrap_strict_tmp.csv
+Dataset/measurement_dataset_public_bootstrap_strict_tmp.report.json
+
+# Generated geometry/solver artifacts
+Dataset/geometries/
+Dataset/palace_inputs/
+Dataset/palace_outputs/
+Dataset/_stale_artifacts_*/
+
+# Downloaded/public raw sources (large and third-party)
+Dataset/public_sources/
+
+# Phase artifacts (generated outputs)
+Phase1_Surrogate/artifacts/
+Phase2_Embedding/artifacts/
+Phase3_InverseDesign/artifacts/
+Phase4_Coherence/artifacts/
+Phase4_Coherence/artifacts_strict_tmp/
+Phase5_ClosedLoop/artifacts/
+Phase6_Reliability/artifacts/
+Phase7_Evidence/artifacts/
+Phase7_Evidence/artifacts_large_sweep/
+Phase7_Evidence/artifacts_strict_tmp/

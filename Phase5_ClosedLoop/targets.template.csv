@@ -1,0 +1,4 @@
+target_id,freq_01_GHz,anharmonicity_GHz,EJ_GHz,EC_GHz,charge_sensitivity_GHz
+example_01,5.0,-0.20,,,
+example_02,5.3,-0.18,,,
+example_03,4.6,-0.24,,,

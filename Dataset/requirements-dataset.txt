@@ -1,0 +1,8 @@
+numpy>=1.24,<2
+pandas>=2.0
+tqdm>=4.66
+scqubits>=3.3
+qiskit-metal>=0.1
+pyEPR-quantum>=0.9
+gmsh>=4.11
+geopandas==0.12.2

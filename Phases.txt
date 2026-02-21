@@ -1,0 +1,107 @@
+## Phase 0: Build Your Dataset (Months 1–2)
+
+Before writing a single line of AI code, you need data. This is the foundation everything else sits on.
+
+Collect every (geometry → simulation result) pair you can find. This means:
+- Scraping the literature for published transmon designs and their parameters.
+- Running Qiskit Metal or scQubits to simulate thousands of variations of known designs automatically. You systematically vary junction size, capacitor size, coupling gap, and record what physics each produces. This is cheap computationally.
+- Adding the Wang Lab's own historical experimental data: every chip they have ever measured, annotated with what was designed versus what was measured.
+
+At the end of this phase you should have: ~10,000 (geometry, simulation) pairs and ~100–500 (geometry, simulation, measurement) triplets. The triplets are gold because they connect design to real-world outcome.
+
+---
+
+## Phase 1: Train the Fast Surrogate (Months 2–4)
+
+A surrogate model is a neural network that has *learned* to mimic the physics simulator. Instead of running HFSS for 4 hours per design, the surrogate returns an answer in milliseconds.
+
+How to build it:
+- Represent the qubit geometry as a set of numbers (parameter vector): junction area, capacitor dimensions, coupling gaps, etc. Not yet as an image — start simple.
+- Train a neural network (a plain feedforward network works fine here) to take those numbers as input and output the simulation results: qubit frequency, anharmonicity, coupling strength.
+- Validate it: run the surrogate and the real simulator on the same designs and check they agree. Aim for less than 1% error.
+
+Once this works, you have replaced a 4-hour simulation with a millisecond calculation. This alone is enormously valuable.
+
+---
+
+## Phase 2: Build the Embedding Space (Months 4–7)
+
+This is the JEPA-style step. Here is the specific implementation:
+
+Train a model with two encoders working in parallel:
+- **Encoder A** takes a qubit geometry (as a parameter vector or eventually as a layout image) and compresses it into a 128-dimensional embedding (a list of 128 numbers).
+- **Encoder B** takes the simulation output (eigenfrequencies, anharmonicities, coupling rates) and compresses it into the same 128-dimensional space.
+
+Training objective: make Encoder A and Encoder B produce similar embeddings for the same design, and different embeddings for different designs. This is called contrastive learning — the same principle behind how OpenAI's CLIP model aligns images and text.
+
+What you get: a shared space where the geometry side and the physics side both live. Now you can do something remarkable. You can ask: "Where in this space are the designs with the longest T1 times?" You navigate the space by interpolating between embeddings and using the surrogate to score each point. This is how you explore the design space intelligently instead of randomly.
+
+When you have measurement data (real experimental T1, T2 values), you add a third encoder for measurements. Now the embedding space connects geometry → simulation → experiment in one coherent map.
+
+---
+
+## Phase 3: The Inverse Design Engine (Months 7–10)
+
+The most powerful part. Instead of going design → simulate → test, you flip it: target physics → find design.
+
+Here is how this works using the embedding space you built in Phase 2:
+1. You specify what you want: "I want a qubit at 5 GHz with anharmonicity of 200 MHz and T1 longer than 500 microseconds."
+2. You encode those target properties using Encoder B into an embedding.
+3. You search the geometry embedding space for a geometry whose embedding is closest to that target embedding.
+4. You decode that geometry back into physical dimensions (junction size, capacitor size, etc.).
+
+This search step can be done with gradient-based optimization (literally doing calculus in the embedding space) or with a generative model. A good starting point is a variational autoencoder (VAE) or a small diffusion model trained to generate geometries — very similar to how image diffusion models generate images from a text description, but here you generate chip layouts from a physics description.
+
+---
+
+## Phase 4: Coherence Prediction — The Hard Problem (Months 10–14)
+
+Predicting T1 and T2 times is genuinely difficult because they depend on microscopic material imperfections (surface oxide, two-level systems, substrate defects) that are not captured in the geometric design. This is where you need to be honest about the limits.
+
+What you can do:
+- Train a probabilistic predictor: instead of predicting a single T1 value, predict a *distribution*. The model says "this design will likely give T1 between 100–300 microseconds" based on how similar it is to chips the lab has previously measured.
+- Identify which geometric features correlate with bad coherence (e.g., chips with more exposed aluminum surface have shorter T1). The model can learn these correlations even without fully understanding the underlying physics.
+- Flag designs that venture into regions of the embedding space with no nearby experimental data — that is the model saying "I don't know, be careful."
+
+This is fundamentally a data accumulation problem. The more chips the lab measures and feeds back into the model, the better the coherence prediction gets. This is the "active learning" loop: the AI proposes designs, the lab builds and measures them, the results go back into training.
+
+---
+
+## Phase 5: The Closed-Loop AI Agent (Months 14–18)
+
+Now all the pieces come together into a system that Tanvir can actually use in conversation.
+
+The workflow becomes:
+1. Researcher states a goal: "I want a transmon with 5 GHz frequency and T1 > 300 µs optimized for the Wang Lab's fabrication process."
+2. The AI agent generates hundreds of candidate geometries using the inverse design engine.
+3. Each candidate is scored by the surrogate (physics accuracy) and the coherence predictor (expected T1/T2).
+4. The top candidates are ranked and presented to Tanvir with a visual layout, predicted parameters, and a confidence estimate.
+5. Tanvir picks one (or asks the agent to adjust) and sends it to fabrication.
+6. When the chip comes back, the measurements feed directly back into retraining. The model improves with every fabrication run.
+
+This is exactly the LEAP71 loop: AI proposes → human approves → manufacture → measure → AI learns. The difference from the current situation is that instead of doing 1–2 iterations per year, you can explore thousands of designs in software and only fabricate the most promising ones.
+
+---
+
+# What Makes This Genuinely Feasible
+
+The reason this is more achievable than it might seem:
+
+- The physics of transmon qubits is extremely well constrained. You are not dealing with chaotic turbulence like a rocket engine. The Hamiltonian is known analytically; you are mostly dealing with parameter extraction from geometry.
+- Qiskit Metal and scQubits are open-source and scriptable, so generating training data is straightforward.
+- The Wang Lab already has historical data. Even 50–100 well-annotated experimental results are enough to fine-tune a coherence predictor that beats random guessing significantly.
+- The community is moving this direction. Papers from groups at MIT, Delft, and IBM have already demonstrated surrogate models for qubit parameter extraction. You would be building on existing work, not starting from scratch.
+
+---
+
+# What to Watch Out For
+
+**Fabrication variation is real.** Even with a perfect design, the foundry will produce variations. Your model should be trained to be robust to this — design chips whose physics is good even if dimensions shift by ±5%.
+
+**Don't over-trust the surrogate.** Always keep the real simulator as a final check. The surrogate is for exploration; the real simulator is for verification before sending to fab.
+
+**Start simple.** Begin with a 2D parameter vector, not chip images. Add image-based geometry representation (useful for detecting layout errors) only after the simpler approach is working.
+
+**Coherence prediction will be wrong early on.** Set expectations correctly with Tanvir: the model will improve with each fabrication run. The goal in the first year is not perfect coherence prediction but a *better filter* — eliminating clearly bad designs before they go to fab.
+
+---

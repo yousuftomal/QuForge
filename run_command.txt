@@ -1,0 +1,142 @@
+﻿# Install training deps (once)
+Dataset\.venv310\Scripts\python -m pip install -r Phase1_Surrogate\requirements-training.txt
+
+# Train both surrogate models
+Dataset\.venv310\Scripts\python Phase1_Surrogate\train_surrogate.py --n-estimators 250 --max-depth 32
+
+# Predict (single)
+Dataset\.venv310\Scripts\python Phase1_Surrogate\predict_surrogate.py --mode single --pad-width-um 500 --pad-height-um 500 --gap-um 30 --junction-area-um2 0.03
+
+# Predict (coupled)
+Dataset\.venv310\Scripts\python Phase1_Surrogate\predict_surrogate.py --mode coupled --freq-q1-ghz 5.1 --freq-q2-ghz 5.3 --resonator-freq-ghz 6.8 --coupling-strength-g-ghz 0.1
+
+# Phase 2: install embedding deps (once)
+Dataset\.venv310\Scripts\python -m pip install -r Phase2_Embedding\requirements-embedding.txt
+
+# Phase 2: train embedding bundle
+Dataset\.venv310\Scripts\python Phase2_Embedding\train_phase2_embedding.py
+
+# Phase 2: validate ID/OOD + inverse-design metrics
+Dataset\.venv310\Scripts\python Phase2_Embedding\validate_phase2_embedding.py
+
+# Phase 2: inverse-design query example
+Dataset\.venv310\Scripts\python Phase2_Embedding\inverse_design.py --freq-01-ghz 5.0 --anharmonicity-ghz -0.2 --top-n 10
+
+# Phase 2 NN (recommended): train
+Dataset\.venv310\Scripts\python Phase2_Embedding\train_phase2_embedding_nn.py
+
+# Phase 2 NN (recommended): validate
+Dataset\.venv310\Scripts\python Phase2_Embedding\validate_phase2_embedding_nn.py
+
+# Phase 2 NN (recommended): inverse-design query example
+Dataset\.venv310\Scripts\python Phase2_Embedding\inverse_design_nn.py --freq-01-ghz 5.0 --anharmonicity-ghz -0.2 --top-n 10
+# Phase 3: install inverse-design deps (once)
+Dataset\.venv310\Scripts\python -m pip install -r Phase3_InverseDesign\requirements-phase3.txt
+
+# Phase 3: inverse-design query (recommended)
+Dataset\.venv310\Scripts\python Phase3_InverseDesign\inverse_design_phase3.py --freq-01-ghz 5.0 --anharmonicity-ghz -0.2 --top-n 10 --output-json Phase3_InverseDesign\artifacts\inverse_design_example.json
+
+# Phase 3: benchmark validation
+Dataset\.venv310\Scripts\python Phase3_InverseDesign\validate_phase3.py --max-queries-per-split 40
+# Phase 3: inverse-design query (robust mode optional)
+Dataset\.venv310\Scripts\python Phase3_InverseDesign\inverse_design_phase3.py --freq-01-ghz 5.0 --anharmonicity-ghz -0.2 --top-n 10 --embedding-weight 0.05 --robustness-weight 0.2 --robust-samples 5 --fabrication-tolerance 0.05
+# Phase 4: install coherence deps (once)
+Dataset\.venv310\Scripts\python -m pip install -r Phase4_Coherence\requirements-phase4.txt
+
+# Phase 4: train coherence model
+Dataset\.venv310\Scripts\python Phase4_Coherence\train_phase4_coherence.py
+
+# Phase 4: validate coherence model
+Dataset\.venv310\Scripts\python Phase4_Coherence\validate_phase4_coherence.py
+
+# Phase 4: predict coherence from geometry
+Dataset\.venv310\Scripts\python Phase4_Coherence\predict_coherence_phase4.py --pad-width-um 500 --pad-height-um 500 --gap-um 30 --junction-area-um2 0.03
+
+# Phase 4: predict coherence from Phase 3 inverse-design candidate
+Dataset\.venv310\Scripts\python Phase4_Coherence\predict_coherence_phase4.py --candidate-json Phase3_InverseDesign\artifacts\inverse_design_example.json --rank 1 --output-json Phase4_Coherence\artifacts\coherence_prediction_example.json
+# Phase 4: build real measured dataset from raw lab export (required for hybrid)
+Dataset\.venv310\Scripts\python Phase4_Coherence\build_measurement_dataset.py --raw-csv Dataset\measurement_raw.csv --output-csv Dataset\measurement_dataset.csv --report-json Dataset\measurement_dataset.report.json
+
+# Phase 4: train/validate with measured data (hybrid mode)
+Dataset\.venv310\Scripts\python Phase4_Coherence\train_phase4_coherence.py --label-mode hybrid --measurement-csv Dataset\measurement_dataset.csv
+Dataset\.venv310\Scripts\python Phase4_Coherence\validate_phase4_coherence.py --measurement-csv Dataset\measurement_dataset.csv
+
+# Phase 4.5: install public-data pipeline deps (once)
+Dataset\.venv310\Scripts\python -m pip install -r Phase4_5_PublicData\requirements-phase45.txt
+
+# Phase 4.5: fetch full public sources (large groups enabled, per-file size cap)
+Dataset\.venv310\Scripts\python Phase4_5_PublicData\fetch_public_datasets.py --include-large --max-download-mb 350
+
+# Phase 4.5: build canonical public measurement dataset
+Dataset\.venv310\Scripts\python Phase4_5_PublicData\build_public_canonical_dataset.py
+Dataset\.venv310\Scripts\python Phase4_5_PublicData\augment_large_raw_sources.py --input-csv Dataset\public_sources\silver\public_measurements_canonical.csv --output-csv Dataset\public_sources\silver\public_measurements_canonical.csv
+
+# Phase 4.5: conservative map from public rows to internal measurement schema
+Dataset\.venv310\Scripts\python Phase4_5_PublicData\map_public_to_internal.py --max-distance 1.6 --min-confidence 0.30
+
+# Phase 4.5: train/validate coherence model using confidence-weighted public bootstrap labels
+Dataset\.venv310\Scripts\python Phase4_Coherence\train_phase4_coherence.py --label-mode hybrid --measurement-csv Dataset\measurement_dataset_public_bootstrap.csv --measured-weight 3.0 --proxy-weight 1.0
+Dataset\.venv310\Scripts\python Phase4_Coherence\validate_phase4_coherence.py --measurement-csv Dataset\measurement_dataset_public_bootstrap.csv
+
+# Phase 4.6: augment public canonical dataset with Zenodo 8004359 trace-fitted coherence
+Dataset\.venv310\Scripts\python Phase4_6_TraceCoherence\augment_with_zenodo_8004359_traces.py
+
+# Phase 4.6: map augmented canonical public rows to internal bootstrap measurement CSV
+Dataset\.venv310\Scripts\python Phase4_5_PublicData\map_public_to_internal.py --public-csv Dataset\public_sources\silver\public_measurements_canonical_augmented.csv --max-distance 1.6 --min-confidence 0.30
+
+# Phase 4.6: conservative retrain/validate using augmented bootstrap labels
+Dataset\.venv310\Scripts\python Phase4_Coherence\train_phase4_coherence.py --label-mode hybrid --measurement-csv Dataset\measurement_dataset_public_bootstrap.csv --measured-weight 1.0 --proxy-weight 1.0
+Dataset\.venv310\Scripts\python Phase4_Coherence\validate_phase4_coherence.py --measurement-csv Dataset\measurement_dataset_public_bootstrap.csv
+
+# Phase 4.6: one-command full pipeline
+Dataset\.venv310\Scripts\python Phase4_6_TraceCoherence\run_phase46_pipeline.py
+
+# Phase 5: install closed-loop deps (once)
+Dataset\.venv310\Scripts\python -m pip install -r Phase5_ClosedLoop\requirements-phase5.txt
+
+# Phase 5: run full closed-loop candidate engine (default 24 targets)
+Dataset\.venv310\Scripts\python Phase5_ClosedLoop\run_phase5_closed_loop.py
+
+# Phase 5: run closed-loop with custom targets CSV
+Dataset\.venv310\Scripts\python Phase5_ClosedLoop\run_phase5_closed_loop.py --targets-csv Phase5_ClosedLoop\targets.template.csv
+
+# Phase 5.1: export fabrication handoff package from selected candidates
+Dataset\.venv310\Scripts\python Phase5_ClosedLoop\export_fab_handoff.py
+
+
+
+
+
+
+# Phase 6: reliability ablations + stress tests (paper-ready artifacts)
+Dataset\.venv310\Scripts\python Phase6_Reliability\run_phase6_reliability.py
+
+# Phase 6: quick run (Phase 4 reliability only; skip Phase 5 stress)
+Dataset\.venv310\Scripts\python Phase6_Reliability\run_phase6_reliability.py --skip-phase5
+# Phase 7: evidence hardening (multi-seed + source holdout + paper tables)
+Dataset\.venv310\Scripts\python Phase7_Evidence\run_phase7_evidence.py
+
+# Phase 7: web interface (non-CLI)
+Dataset\.venv310\Scripts\python -m pip install -r Phase7_Evidence\requirements-phase7.txt
+$env:PYTHONUTF8='1'
+Dataset\.venv310\Scripts\python -m streamlit run Phase7_Evidence\webapp\app.py
+
+# Phase 7: publication figure pack (from large sweep)
+Dataset\.venv310\Scripts\python Phase7_Evidence\generate_publication_figures.py --input-dir Phase7_Evidence\artifacts_large_sweep --output-dir Phase7_Evidence\artifacts_large_sweep\figures
+
+# Final paper rerun (strict physics + larger evidence sweep)
+Dataset\.venv310\Scripts\python Dataset\generate_data.py --workdir Dataset --sampling-mode random --geometry-samples 1200 --junction-samples 10 --target-single-rows 10000 --max-pairs 5000 --gmsh-verbosity 0 --mesh-lc-min-um 30 --mesh-lc-max-um 120 --mesh-optimize-threshold 0.45 --no-palace-fallback
+Dataset\.venv310\Scripts\python Phase4_5_PublicData\build_public_canonical_dataset.py
+Dataset\.venv310\Scripts\python Phase4_5_PublicData\augment_large_raw_sources.py --input-csv Dataset\public_sources\silver\public_measurements_canonical.csv --output-csv Dataset\public_sources\silver\public_measurements_canonical.csv
+Dataset\.venv310\Scripts\python Phase4_5_PublicData\map_public_to_internal.py --max-distance 1.6 --min-confidence 0.30
+Dataset\.venv310\Scripts\python Phase1_Surrogate\train_surrogate.py --n-estimators 250 --max-depth 32
+Dataset\.venv310\Scripts\python Phase2_Embedding\train_phase2_embedding_nn.py
+Dataset\.venv310\Scripts\python Phase2_Embedding\validate_phase2_embedding_nn.py
+Dataset\.venv310\Scripts\python Phase3_InverseDesign\validate_phase3.py --max-queries-per-split 40
+Dataset\.venv310\Scripts\python Phase4_Coherence\train_phase4_coherence.py --label-mode hybrid --measurement-csv Dataset\measurement_dataset_public_bootstrap.csv --measured-weight 1.0 --proxy-weight 1.0
+Dataset\.venv310\Scripts\python Phase4_Coherence\validate_phase4_coherence.py --measurement-csv Dataset\measurement_dataset_public_bootstrap.csv
+Dataset\.venv310\Scripts\python Phase5_ClosedLoop\run_phase5_closed_loop.py
+Dataset\.venv310\Scripts\python Phase6_Reliability\run_phase6_reliability.py
+Dataset\.venv310\Scripts\python Phase7_Evidence\run_phase7_evidence.py --measurement-csv Dataset\measurement_dataset_public_bootstrap.csv --output-dir Phase7_Evidence\artifacts_large_sweep --seeds 42,123,777,1001,1002,1003,1004,1005,1006,1007
+Dataset\.venv310\Scripts\python Phase7_Evidence\generate_publication_figures.py --input-dir Phase7_Evidence\artifacts_large_sweep --output-dir Phase7_Evidence\artifacts_large_sweep\figures
+Dataset\.venv310\Scripts\python Phase7_Evidence\generate_extended_publication_figures.py --phase7-dir Phase7_Evidence\artifacts_large_sweep --phase6-dir Phase6_Reliability\artifacts --phase5-dir Phase5_ClosedLoop\artifacts --single-csv Dataset\final_dataset_single.csv --output-dir Phase7_Evidence\artifacts_large_sweep\figures

@@ -1,0 +1,4 @@
+row_index,design_id,chip_id,cooldown_id,measurement_date_utc,measured_t1_us,measured_t2_us,measured_freq_01_GHz,measured_anharmonicity_GHz,notes
+0,4,chip_A,cd_001,2026-01-15T13:10:00Z,,,,,fill from lab
+1,5,chip_A,cd_001,2026-01-15T13:22:00Z,,,,,fill from lab
+2,6,chip_B,cd_002,2026-01-21T09:05:00Z,,,,,fill from lab
