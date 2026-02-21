@@ -31,7 +31,7 @@ flowchart LR
     D --> E[Phase 4: Coherence + Uncertainty]
     E --> F[Phase 5: Closed-Loop Candidate Selection]
     F --> G[Phase 6: Reliability Ablations]
-    G --> H[Phase 7: Evidence Hardening + Figures + UI]
+    G --> H[Phase 7: Evidence Hardening + Figures]
 ```
 
 ## Repository Layout
@@ -47,7 +47,7 @@ flowchart LR
 | `Phase4_6_TraceCoherence/` | Trace-based augmentation pipeline |
 | `Phase5_ClosedLoop/` | Closed-loop candidate scoring and fab handoff export |
 | `Phase6_Reliability/` | Reliability variant comparisons and stress tests |
-| `Phase7_Evidence/` | Multi-seed evidence hardening, holdout runs, figure generation, and web app |
+| `Phase7_Evidence/` | Multi-seed evidence hardening, holdout runs, and figure generation |
 
 ## Current Run Snapshot (Latest Strict Rerun)
 

@@ -7,7 +7,6 @@ Phase 7 hardens evidence for research validation and lab evaluation.
 - Multi-seed reliability stability analysis (via repeated Phase 6 runs with `--skip-phase5`)
 - Source holdout validation (leave-one-source-out on mapped measurement sources)
 - Summary artifacts (`csv`, `json`, `md`)
-- Non-CLI web interface for running closed-loop design batches
 
 ## Run Phase 7
 
@@ -21,13 +20,9 @@ Optional (custom seeds):
 Dataset\.venv310\Scripts\python Phase7_Evidence\run_phase7_evidence.py --seeds 42,123,777,2026
 ```
 
-## Launch Web Interface (non-CLI usage once opened)
+## Private UI Note
 
-```powershell
-Dataset\.venv310\Scripts\python -m pip install -r Phase7_Evidence\requirements-phase7.txt
-$env:PYTHONUTF8='1'
-Dataset\.venv310\Scripts\python -m streamlit run Phase7_Evidence\webapp\app.py
-```
+An internal non-CLI web interface exists for interactive closed-loop runs, but its code is intentionally excluded from this public repository.
 
 ## Key output files
 
