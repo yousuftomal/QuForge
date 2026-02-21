@@ -1,6 +1,6 @@
 ﻿# Phase 6 Reliability
 
-This phase runs reliability-focused ablations and stress tests for publishable evidence.
+This phase runs reliability-focused ablations and stress tests for reproducible evidence.
 
 ## What it does
 
@@ -9,7 +9,7 @@ This phase runs reliability-focused ablations and stress tests for publishable e
 - Computes risk-coverage curves and abstention gains from each trained bundle.
 - Selects primary and secondary Phase 4 variants by a reliability rank.
 - Runs Phase 5 stress tests (strict and gate-relaxed settings) using the chosen Phase 4 bundles.
-- Writes paper-ready outputs:
+- Writes reliability evaluation outputs:
   - `phase6_phase4_variant_summary.csv`
   - `phase6_risk_coverage_curves.csv`
   - `phase6_phase5_stress_summary.csv` (unless `--skip-phase5`)

@@ -1,12 +1,12 @@
 ﻿# Phase 7 Evidence
 
-Phase 7 hardens claims for paper and lab deployment.
+Phase 7 hardens evidence for research validation and lab evaluation.
 
 ## Deliverables
 
 - Multi-seed reliability stability analysis (via repeated Phase 6 runs with `--skip-phase5`)
 - Source holdout validation (leave-one-source-out on mapped measurement sources)
-- Paper-ready summary artifacts (`csv`, `json`, `md`)
+- Summary artifacts (`csv`, `json`, `md`)
 - Non-CLI web interface for running closed-loop design batches
 
 ## Run Phase 7
@@ -34,13 +34,12 @@ Dataset\.venv310\Scripts\python -m streamlit run Phase7_Evidence\webapp\app.py
 - `Phase7_Evidence/artifacts/phase7_multiseed_raw.csv`
 - `Phase7_Evidence/artifacts/phase7_multiseed_summary.csv`
 - `Phase7_Evidence/artifacts/source_holdout/phase7_source_holdout_summary.csv`
-- `Phase7_Evidence/artifacts/paper/phase7_paper_claims_table.csv`
 - `Phase7_Evidence/artifacts/phase7_report.md`
 - `Phase7_Evidence/artifacts/phase7_summary.json`
 
-## Publication Figure Pack
+## Figure Pack
 
-Generate paper-ready figures from the large sweep:
+Generate figures from the large sweep:
 
 ```powershell
 Dataset\.venv310\Scripts\python Phase7_Evidence\generate_publication_figures.py --input-dir Phase7_Evidence\artifacts_large_sweep --output-dir Phase7_Evidence\artifacts_large_sweep\figures

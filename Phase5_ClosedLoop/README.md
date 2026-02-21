@@ -37,7 +37,7 @@ Dataset\.venv310\Scripts\python Phase5_ClosedLoop\run_phase5_closed_loop.py --ta
 - `Phase5_ClosedLoop/artifacts/phase5_report.md`
 ## Phase 5.1 Fabrication Handoff
 
-Export a fabrication-ready package from the selected Phase 5 candidates:
+Export a fabrication handoff package from the selected Phase 5 candidates:
 
 ```powershell
 Dataset\.venv310\Scripts\python Phase5_ClosedLoop\export_fab_handoff.py
