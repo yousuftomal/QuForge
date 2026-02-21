@@ -149,7 +149,7 @@ Dataset\.venv310\Scripts\python Dataset\generate_data.py --dry-run --workdir Dat
 Dataset\.venv310\Scripts\python Dataset\generate_data.py --workdir Dataset --sampling-mode random --geometry-samples 1200 --junction-samples 10 --target-single-rows 10000 --max-pairs 5000 --gmsh-verbosity 0 --mesh-lc-min-um 30 --mesh-lc-max-um 120 --mesh-optimize-threshold 0.45 --no-palace-fallback
 ```
 
-### Full Paper Stream
+### Full End-to-End Reproducibility Stream
 
 Run in order:
 
@@ -167,6 +167,7 @@ Dataset\.venv310\Scripts\python Phase4_Coherence\validate_phase4_coherence.py --
 Dataset\.venv310\Scripts\python Phase5_ClosedLoop\run_phase5_closed_loop.py
 Dataset\.venv310\Scripts\python Phase6_Reliability\run_phase6_reliability.py
 Dataset\.venv310\Scripts\python Phase7_Evidence\run_phase7_evidence.py --measurement-csv Dataset\measurement_dataset_public_bootstrap.csv --output-dir Phase7_Evidence\artifacts_large_sweep --seeds 42,123,777,1001,1002,1003,1004,1005,1006,1007
+# Figure scripts keep "publication" in filename for historical compatibility.
 Dataset\.venv310\Scripts\python Phase7_Evidence\generate_publication_figures.py --input-dir Phase7_Evidence\artifacts_large_sweep --output-dir Phase7_Evidence\artifacts_large_sweep\figures
 Dataset\.venv310\Scripts\python Phase7_Evidence\generate_extended_publication_figures.py --phase7-dir Phase7_Evidence\artifacts_large_sweep --phase6-dir Phase6_Reliability\artifacts --phase5-dir Phase5_ClosedLoop\artifacts --single-csv Dataset\final_dataset_single.csv --output-dir Phase7_Evidence\artifacts_large_sweep\figures
 ```
