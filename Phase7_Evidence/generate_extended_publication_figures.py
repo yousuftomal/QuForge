@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Dict, Optional
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import seaborn as sns
 
@@ -61,31 +62,84 @@ def fig4_risk_coverage(phase6_dir: Path, outdir: Path) -> Optional[Path]:
     if df.empty:
         return None
 
-    fig, axes = plt.subplots(1, 2, figsize=(13.0, 5.2))
+    # Compute per-target AURC values for legend labels and ordering.
+    aurc_rows = []
+    for (variant, target), grp in df.groupby(["variant", "target"]):
+        g = grp.sort_values("coverage")
+        aurc_rows.append(
+            {
+                "variant": str(variant),
+                "target": str(target),
+                "aurc": float(np.trapz(g["risk"].to_numpy(dtype=float), x=g["coverage"].to_numpy(dtype=float))),
+            }
+        )
+    aurc_df = pd.DataFrame(aurc_rows)
+    if aurc_df.empty:
+        return None
+
+    variant_order = (
+        aurc_df.groupby("variant", as_index=False)["aurc"]
+        .mean()
+        .sort_values("aurc", ascending=True)["variant"]
+        .tolist()
+    )
+
+    palette_vals = sns.color_palette("colorblind", n_colors=len(variant_order))
+    palette = {v: palette_vals[i] for i, v in enumerate(variant_order)}
+    highlight_variant = "hybrid_full_conf"
+
+    target_title = {
+        "t1_us": r"$T_1$ Risk-Coverage",
+        "t2_us_log10": r"$T_2(\log_{10})$ Risk-Coverage",
+    }
+    target_ylabel = {
+        "t1_us": r"Risk (mean absolute error, $\mu$s)",
+        "t2_us_log10": r"Risk (mean absolute error, $\log_{10}$ units)",
+    }
+
+    fig, axes = plt.subplots(1, 2, figsize=(15.0, 5.8), sharex=True)
     for ax, target in zip(axes, ["t1_us", "t2_us_log10"]):
-        sub = df[df["target"] == target]
+        sub = df[df["target"] == target].copy()
         if sub.empty:
             ax.set_visible(False)
             continue
-        sns.lineplot(
-            data=sub,
-            x="coverage",
-            y="risk",
-            hue="variant",
-            marker="o",
-            linewidth=1.6,
-            markersize=3.5,
-            ax=ax,
-        )
-        ax.set_title(f"Risk-Coverage ({target})")
+
+        aurc_map = {
+            str(r["variant"]): float(r["aurc"])
+            for _, r in aurc_df[aurc_df["target"] == target].iterrows()
+        }
+
+        for variant in variant_order:
+            vsub = sub[sub["variant"] == variant].sort_values("coverage")
+            if vsub.empty:
+                continue
+            is_highlight = variant == highlight_variant
+            ax.plot(
+                vsub["coverage"].to_numpy(dtype=float),
+                vsub["risk"].to_numpy(dtype=float),
+                marker="o",
+                markersize=4.2 if is_highlight else 3.0,
+                linewidth=3.0 if is_highlight else 1.8,
+                alpha=1.0 if is_highlight else 0.88,
+                color=palette[variant],
+                label=f"{variant} (AURC={aurc_map.get(variant, float('nan')):.3f})",
+                zorder=4 if is_highlight else 2,
+            )
+
+        ax.set_title(target_title.get(target, f"Risk-Coverage ({target})"))
         ax.set_xlabel("Coverage")
-        ax.set_ylabel("Risk")
-        ax.legend(title="Variant", fontsize=8, title_fontsize=9)
-        ax.grid(alpha=0.25, linewidth=0.7)
+        ax.set_ylabel(target_ylabel.get(target, "Risk"))
+        ax.set_xlim(0.1, 1.0)
+        ax.set_xticks(np.linspace(0.1, 1.0, 10))
+        ax.grid(alpha=0.28, linewidth=0.75, linestyle="--")
+        ax.legend(title="Variant (lower AURC is better)", fontsize=8, title_fontsize=9, frameon=True, loc="best")
+
+    fig.suptitle("Risk-Coverage Curves (Eval-All Split)", y=1.02, fontsize=14)
+    sns.despine(fig=fig)
 
     fig.tight_layout()
     out = maybe_save(outdir / "figure4_risk_coverage_curves.png")
-    fig.savefig(out, dpi=220, bbox_inches="tight")
+    fig.savefig(out, dpi=280, bbox_inches="tight")
     plt.close(fig)
     return out
 

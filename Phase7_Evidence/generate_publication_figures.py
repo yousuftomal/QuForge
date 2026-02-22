@@ -44,9 +44,9 @@ def make_rank_stability(summary: pd.DataFrame, outdir: Path) -> Path:
         df["reliability_rank_mean"],
         yerr=df["reliability_rank_std"],
         capsize=5,
-        color="#2a9d8f",
-        edgecolor="#1f6f67",
-        alpha=0.9,
+        color="#4c78a8",
+        edgecolor="#355c8c",
+        alpha=0.92,
         label="Mean reliability rank (lower is better)",
     )
     ax1.set_ylabel("Reliability Rank")
@@ -67,7 +67,7 @@ def make_rank_stability(summary: pd.DataFrame, outdir: Path) -> Path:
     ax2.set_ylim(0, max(10, int(df["top1_count"].max()) + 1))
 
     ax1.grid(axis="y", linestyle="--", alpha=0.3)
-    ax1.set_title("Figure 1. Reliability Rank Stability Across Seeds")
+    ax1.set_title("Reliability Rank Stability Across Seeds")
 
     lines, labels = [], []
     for ax in [ax1, ax2]:
@@ -124,7 +124,7 @@ def make_ood_boxplots(raw: pd.DataFrame, outdir: Path) -> Path:
     axes[1].tick_params(axis="x", rotation=20)
     axes[1].grid(axis="y", linestyle="--", alpha=0.3)
 
-    fig.suptitle("Figure 2. OOD Error Distributions Across 10 Seeds", y=1.02, fontsize=13)
+    fig.suptitle("OOD Error Distributions Across 10 Seeds", y=1.02, fontsize=13)
     fig.tight_layout()
     out = outdir / "figure2_ood_boxplots.png"
     fig.savefig(out, dpi=220, bbox_inches="tight")
@@ -151,7 +151,7 @@ def make_holdout_table(holdout: pd.DataFrame, outdir: Path) -> Path:
 
     fig, ax = plt.subplots(figsize=(13.8, max(2.8, 1.2 + 0.62 * len(df))))
     ax.axis("off")
-    ax.set_title("Figure 3. Source Holdout Error Table", loc="left", fontsize=13, pad=12)
+    ax.set_title("Source Holdout Error Table", loc="left", fontsize=13, pad=12)
 
     table = ax.table(
         cellText=df.values,
