@@ -26,16 +26,7 @@ It is not currently claiming:
 
 ## End-to-End Pipeline
 
-```mermaid
-flowchart LR
-    A[Phase 0: Dataset Generation] --> B[Phase 1: Surrogate Models]
-    B --> C[Phase 2: Embedding + Retrieval]
-    C --> D[Phase 3: Inverse Design Engine]
-    D --> E[Phase 4: Coherence + Uncertainty]
-    E --> F[Phase 5: Closed-Loop Candidate Selection]
-    F --> G[Phase 6: Reliability Ablations]
-    G --> H[Phase 7: Evidence Hardening + Figures]
-```
+![Pipeline overview](docs/figures/figure0_pipeline_overview.png)
 
 ## Repository Layout
 
