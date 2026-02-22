@@ -64,3 +64,6 @@ Claude_Opinion.md
 
 # Local manuscript workspace
 paper/
+
+# Local external tools/workspace (not for repo)
+.local_tools/
