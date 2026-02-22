@@ -4,6 +4,7 @@ QuForge is an end-to-end AI pipeline for superconducting qubit design exploratio
 
 Current design scope: fixed-frequency transmon qubits (and transmon-derived coupled metrics in this pipeline).
 
+
 It combines:
 - physics-driven synthetic dataset generation,
 - surrogate and embedding models for inverse design,
@@ -60,6 +61,10 @@ The latest strict rerun used:
 | Unique referenced GDS | `1027` |
 | Strict mapped public measured rows | `5` |
 | Rejected fitted/model rows in strict map | `1240` |
+
+Source-provenance note:
+- Canonical public ingestion includes `Zenodo:18045662` (1218 rows), `DataGov:NIST:mds2-3027` (21), `SQuADDS` (5), and `Zenodo:15364358_tracefit` (1).
+- After strict fitted/model-curve rejection and conservative mapping, only `SQuADDS` contributes geometry-linked supervised rows (`5`); all other sources contribute `0` mapped rows.
 
 ### Reliability/Evidence Highlights
 
@@ -165,6 +170,8 @@ Dataset\.venv310\Scripts\python Phase7_Evidence\run_phase7_evidence.py --measure
 Dataset\.venv310\Scripts\python Phase7_Evidence\generate_publication_figures.py --input-dir Phase7_Evidence\artifacts_large_sweep --output-dir Phase7_Evidence\artifacts_large_sweep\figures
 Dataset\.venv310\Scripts\python Phase7_Evidence\generate_extended_publication_figures.py --phase7-dir Phase7_Evidence\artifacts_large_sweep --phase6-dir Phase6_Reliability\artifacts --phase5-dir Phase5_ClosedLoop\artifacts --single-csv Dataset\final_dataset_single.csv --output-dir Phase7_Evidence\artifacts_large_sweep\figures
 ```
+
+Fixed evidence seed set: `42,123,777,1001,1002,1003,1004,1005,1006,1007`.
 
 ## Environment Notes
 
