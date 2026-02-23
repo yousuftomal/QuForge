@@ -29,6 +29,9 @@ Dataset/measurement_dataset.csv
 Dataset/measurement_dataset.report.json
 Dataset/measurement_dataset_public_bootstrap.csv
 Dataset/measurement_dataset_public_bootstrap.report.json
+Dataset/measurement_dataset_public_bootstrap_aggregated.csv
+Dataset/measurement_dataset_public_bootstrap_augmented.csv
+Dataset/measurement_dataset_public_bootstrap_augmented.report.json
 Dataset/measurement_dataset_public_bootstrap_strict_tmp.csv
 Dataset/measurement_dataset_public_bootstrap_strict_tmp.report.json
 

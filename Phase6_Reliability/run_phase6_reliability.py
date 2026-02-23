@@ -42,12 +42,14 @@ class VariantSpec:
 
 def parse_args() -> argparse.Namespace:
     root = Path(__file__).resolve().parents[1]
+    preferred_measurement = root / "Dataset" / "measurement_dataset_public_bootstrap_augmented.csv"
+    default_measurement = preferred_measurement if preferred_measurement.exists() else (root / "Dataset" / "measurement_dataset_public_bootstrap.csv")
     parser = argparse.ArgumentParser(description="Phase 6 reliability ablation + stress pipeline")
     parser.add_argument("--single-csv", type=Path, default=root / "Dataset" / "final_dataset_single.csv")
     parser.add_argument(
         "--measurement-csv",
         type=Path,
-        default=root / "Dataset" / "measurement_dataset_public_bootstrap.csv",
+        default=default_measurement,
     )
     parser.add_argument("--phase2-bundle", type=Path, default=root / "Phase2_Embedding" / "artifacts" / "phase2_nn_bundle.pt")
     parser.add_argument(

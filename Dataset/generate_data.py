@@ -747,6 +747,13 @@ def compute_coupled_properties(
 ) -> Dict[str, float]:
     """
     Two-transmon + resonator coupled model with scqubits HilbertSpace.
+
+    Dispersive shifts are computed from dressed energies using cross-Kerr
+    combinations:
+      chi_q1r = E101 - E100 - E001 + E000
+      chi_q2r = E011 - E010 - E001 + E000
+    and reported as a scalar aggregate chi = mean(chi_q1r, chi_q2r) for
+    backward compatibility with existing downstream interfaces.
     """
     try:
         import scqubits as scq
@@ -768,17 +775,76 @@ def compute_coupled_properties(
         add_hc=True,
     )
 
-    evals = np.array(hs.eigenvals(evals_count=10), dtype=float)
-    if evals.size < 3:
-        raise ValueError("Not enough eigenvalues returned from coupled system")
+    def _analytic_chi(g_ghz: float, wq_ghz: float, wr_ghz: float, alpha_ghz: float) -> float:
+        delta = float(wq_ghz - wr_ghz)
+        # Keep a small floor to avoid singular behavior near resonance.
+        floor = 1e-9
+        if abs(delta) < floor or abs(delta + alpha_ghz) < floor:
+            return float("nan")
+        denom = float(delta * (delta + alpha_ghz))
+        if abs(denom) < floor:
+            return float("nan")
+        return float(-(g_ghz ** 2) * alpha_ghz / denom)
 
-    dressed_q1 = float(evals[1] - evals[0])
-    dressed_q2 = float(evals[2] - evals[0])
-    chi = float(dressed_q2 - dressed_q1 - resonator_freq_ghz)
+    def _mean_finite(values: Sequence[float]) -> float:
+        finite = [float(v) for v in values if np.isfinite(v)]
+        if not finite:
+            return float("nan")
+        return float(np.mean(finite))
+
+    g_q1r = float(g_coupling_ghz)
+    g_q2r = float(0.8 * g_coupling_ghz)
+
+    # Analytic dispersive estimate used as a robust fallback when dressed-state
+    # lookup is unavailable/ambiguous.
+    q1_freq_bare = float(q1.E01())
+    q2_freq_bare = float(q2.E01())
+    q1_anharm = float(q1.anharmonicity())
+    q2_anharm = float(q2.anharmonicity())
+    chi_q1r_analytic = _analytic_chi(g_q1r, q1_freq_bare, float(resonator_freq_ghz), q1_anharm)
+    chi_q2r_analytic = _analytic_chi(g_q2r, q2_freq_bare, float(resonator_freq_ghz), q2_anharm)
+
+    # Numerical dressed-energy extraction (preferred).
+    dressed_q1 = float("nan")
+    dressed_q2 = float("nan")
+    chi_q1r = float("nan")
+    chi_q2r = float("nan")
+    try:
+        # Bare-state labeling gives stable energy combinations for chi extraction.
+        hs.generate_lookup(ordering="BE", BEs_count=40)
+        e000 = float(hs.energy_by_bare_index((0, 0, 0), subtract_ground=False))
+        e100 = float(hs.energy_by_bare_index((1, 0, 0), subtract_ground=False))
+        e010 = float(hs.energy_by_bare_index((0, 1, 0), subtract_ground=False))
+        e001 = float(hs.energy_by_bare_index((0, 0, 1), subtract_ground=False))
+        e101 = float(hs.energy_by_bare_index((1, 0, 1), subtract_ground=False))
+        e011 = float(hs.energy_by_bare_index((0, 1, 1), subtract_ground=False))
+
+        dressed_q1 = float(e100 - e000)
+        dressed_q2 = float(e010 - e000)
+        chi_q1r = float(e101 - e100 - e001 + e000)
+        chi_q2r = float(e011 - e010 - e001 + e000)
+    except Exception:
+        # Keep analytic fallback values below.
+        pass
+
+    if not np.isfinite(dressed_q1) or not np.isfinite(dressed_q2):
+        evals = np.array(hs.eigenvals(evals_count=10), dtype=float)
+        if evals.size < 3:
+            raise ValueError("Not enough eigenvalues returned from coupled system")
+        dressed_q1 = float(evals[1] - evals[0])
+        dressed_q2 = float(evals[2] - evals[0])
+
+    if not np.isfinite(chi_q1r):
+        chi_q1r = chi_q1r_analytic
+    if not np.isfinite(chi_q2r):
+        chi_q2r = chi_q2r_analytic
+    chi = _mean_finite([chi_q1r, chi_q2r])
 
     return {
         "dressed_freq_q1_GHz": dressed_q1,
         "dressed_freq_q2_GHz": dressed_q2,
+        "dispersive_shift_chi_q1r_GHz": float(chi_q1r),
+        "dispersive_shift_chi_q2r_GHz": float(chi_q2r),
         "dispersive_shift_chi_GHz": chi,
         "coupling_strength_g_GHz": g_coupling_ghz,
     }

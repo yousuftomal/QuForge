@@ -147,6 +147,14 @@ def load_measurement_df(path: Path) -> Optional[pd.DataFrame]:
 
     weight_col = find_first_present(raw.columns, ["confidence_weight", "sample_weight", "weight"])
     source_col = find_first_present(raw.columns, ["source_name", "source", "dataset_source"])
+    tier_col = find_first_present(raw.columns, ["measurement_quality_tier", "quality_tier"])
+    uncertainty_col = find_first_present(raw.columns, ["uncertainty_inflation_base"])
+    quality_mul_col = find_first_present(raw.columns, ["quality_weight_multiplier"])
+    fitted_col = find_first_present(raw.columns, ["is_fitted_or_model_row"])
+    source_record_col = find_first_present(raw.columns, ["source_record_id"])
+    synthetic_col = find_first_present(raw.columns, ["is_synthetic_regularization"])
+    anchor_source_col = find_first_present(raw.columns, ["anchor_source_name"])
+    anchor_row_col = find_first_present(raw.columns, ["anchor_row_index"])
 
     keep_cols: List[str] = []
     if row_col is not None:
@@ -161,6 +169,22 @@ def load_measurement_df(path: Path) -> Optional[pd.DataFrame]:
         keep_cols.append(weight_col)
     if source_col is not None and source_col not in keep_cols:
         keep_cols.append(source_col)
+    if tier_col is not None and tier_col not in keep_cols:
+        keep_cols.append(tier_col)
+    if uncertainty_col is not None and uncertainty_col not in keep_cols:
+        keep_cols.append(uncertainty_col)
+    if quality_mul_col is not None and quality_mul_col not in keep_cols:
+        keep_cols.append(quality_mul_col)
+    if fitted_col is not None and fitted_col not in keep_cols:
+        keep_cols.append(fitted_col)
+    if source_record_col is not None and source_record_col not in keep_cols:
+        keep_cols.append(source_record_col)
+    if synthetic_col is not None and synthetic_col not in keep_cols:
+        keep_cols.append(synthetic_col)
+    if anchor_source_col is not None and anchor_source_col not in keep_cols:
+        keep_cols.append(anchor_source_col)
+    if anchor_row_col is not None and anchor_row_col not in keep_cols:
+        keep_cols.append(anchor_row_col)
 
     out = raw[keep_cols].copy()
     if row_col is not None and row_col != "row_index":
@@ -175,6 +199,22 @@ def load_measurement_df(path: Path) -> Optional[pd.DataFrame]:
         out = out.rename(columns={weight_col: "confidence_weight"})
     if source_col is not None and source_col != "source_name":
         out = out.rename(columns={source_col: "source_name"})
+    if tier_col is not None and tier_col != "measurement_quality_tier":
+        out = out.rename(columns={tier_col: "measurement_quality_tier"})
+    if uncertainty_col is not None and uncertainty_col != "uncertainty_inflation_base":
+        out = out.rename(columns={uncertainty_col: "uncertainty_inflation_base"})
+    if quality_mul_col is not None and quality_mul_col != "quality_weight_multiplier":
+        out = out.rename(columns={quality_mul_col: "quality_weight_multiplier"})
+    if fitted_col is not None and fitted_col != "is_fitted_or_model_row":
+        out = out.rename(columns={fitted_col: "is_fitted_or_model_row"})
+    if source_record_col is not None and source_record_col != "source_record_id":
+        out = out.rename(columns={source_record_col: "source_record_id"})
+    if synthetic_col is not None and synthetic_col != "is_synthetic_regularization":
+        out = out.rename(columns={synthetic_col: "is_synthetic_regularization"})
+    if anchor_source_col is not None and anchor_source_col != "anchor_source_name":
+        out = out.rename(columns={anchor_source_col: "anchor_source_name"})
+    if anchor_row_col is not None and anchor_row_col != "anchor_row_index":
+        out = out.rename(columns={anchor_row_col: "anchor_row_index"})
 
     if "row_index" in out.columns:
         out["row_index"] = pd.to_numeric(out["row_index"], errors="coerce")
@@ -189,8 +229,206 @@ def load_measurement_df(path: Path) -> Optional[pd.DataFrame]:
         out.loc[out["confidence_weight"] <= 0, "confidence_weight"] = np.nan
     if "source_name" in out.columns:
         out["source_name"] = out["source_name"].fillna("").astype(str)
+    if "measurement_quality_tier" in out.columns:
+        out["measurement_quality_tier"] = out["measurement_quality_tier"].fillna("").astype(str)
+    if "uncertainty_inflation_base" in out.columns:
+        out["uncertainty_inflation_base"] = pd.to_numeric(out["uncertainty_inflation_base"], errors="coerce")
+    if "quality_weight_multiplier" in out.columns:
+        out["quality_weight_multiplier"] = pd.to_numeric(out["quality_weight_multiplier"], errors="coerce")
+    if "is_fitted_or_model_row" in out.columns:
+        out["is_fitted_or_model_row"] = out["is_fitted_or_model_row"].fillna(False).astype(bool)
+    if "source_record_id" in out.columns:
+        out["source_record_id"] = out["source_record_id"].fillna("").astype(str)
+    if "is_synthetic_regularization" in out.columns:
+        if out["is_synthetic_regularization"].dtype != bool:
+            txt = out["is_synthetic_regularization"].fillna("").astype(str).str.strip().str.lower()
+            out["is_synthetic_regularization"] = txt.isin({"1", "true", "t", "yes", "y"})
+        out["is_synthetic_regularization"] = out["is_synthetic_regularization"].fillna(False).astype(bool)
+    else:
+        out["is_synthetic_regularization"] = False
+    if "anchor_source_name" in out.columns:
+        out["anchor_source_name"] = out["anchor_source_name"].fillna("").astype(str)
+    else:
+        out["anchor_source_name"] = ""
+    if "anchor_row_index" in out.columns:
+        out["anchor_row_index"] = pd.to_numeric(out["anchor_row_index"], errors="coerce")
+    else:
+        out["anchor_row_index"] = np.nan
 
     return out
+
+
+def _effective_sample_size(weights: np.ndarray) -> float:
+    w = np.asarray(weights, dtype=float)
+    w = w[np.isfinite(w) & (w > 0)]
+    if w.size == 0:
+        return 0.0
+    wsum = float(np.sum(w))
+    w2sum = float(np.sum(np.square(w)))
+    if w2sum <= 1e-18:
+        return float(w.size)
+    return float((wsum * wsum) / w2sum)
+
+
+def _weighted_mean_std(values: np.ndarray, weights: np.ndarray) -> Tuple[float, float, int]:
+    vals = np.asarray(values, dtype=float)
+    w = np.asarray(weights, dtype=float)
+    mask = np.isfinite(vals) & np.isfinite(w) & (w > 0)
+    if int(mask.sum()) == 0:
+        return np.nan, np.nan, 0
+    v = vals[mask]
+    ww = w[mask]
+    wsum = float(np.sum(ww))
+    if wsum <= 1e-18:
+        return np.nan, np.nan, 0
+    mean = float(np.sum(v * ww) / wsum)
+    var = float(np.sum(ww * np.square(v - mean)) / wsum)
+    return mean, float(np.sqrt(max(var, 0.0))), int(mask.sum())
+
+
+def _build_measurement_aggregate(base: pd.DataFrame, measurement_df: Optional[pd.DataFrame]) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
+    if measurement_df is None or len(measurement_df) == 0:
+        return None, None
+
+    mdf = measurement_df.copy()
+    id_col: Optional[str] = None
+    if "row_index" in mdf.columns and np.isfinite(pd.to_numeric(mdf["row_index"], errors="coerce")).any():
+        id_col = "row_index"
+        mdf["row_index"] = pd.to_numeric(mdf["row_index"], errors="coerce")
+        mdf = mdf.dropna(subset=["row_index"]).copy()
+        mdf["row_index"] = mdf["row_index"].astype(int)
+        valid_ids = set(base["row_index"].astype(int).tolist())
+        mdf = mdf[mdf["row_index"].isin(valid_ids)].copy()
+    elif "design_id" in mdf.columns and np.isfinite(pd.to_numeric(mdf["design_id"], errors="coerce")).any():
+        id_col = "design_id"
+        mdf["design_id"] = pd.to_numeric(mdf["design_id"], errors="coerce")
+        mdf = mdf.dropna(subset=["design_id"]).copy()
+        mdf["design_id"] = mdf["design_id"].astype(int)
+        valid_ids = set(base["design_id"].astype(int).tolist())
+        mdf = mdf[mdf["design_id"].isin(valid_ids)].copy()
+    else:
+        return None, None
+
+    if mdf.empty:
+        return None, id_col
+
+    if "confidence_weight" in mdf.columns:
+        raw_w = pd.to_numeric(mdf["confidence_weight"], errors="coerce")
+    else:
+        raw_w = pd.Series(np.ones(len(mdf), dtype=float), index=mdf.index)
+    raw_w = raw_w.fillna(1.0).clip(lower=1e-6)
+    mdf["confidence_weight"] = raw_w.to_numpy(dtype=float)
+
+    if "quality_weight_multiplier" in mdf.columns:
+        qmul = pd.to_numeric(mdf["quality_weight_multiplier"], errors="coerce").fillna(1.0).clip(lower=0.05, upper=2.0)
+    else:
+        qmul = pd.Series(np.ones(len(mdf), dtype=float), index=mdf.index)
+    mdf["quality_weight_multiplier"] = qmul.to_numpy(dtype=float)
+    mdf["effective_weight"] = mdf["confidence_weight"] * mdf["quality_weight_multiplier"]
+
+    if "measurement_quality_tier" not in mdf.columns:
+        mdf["measurement_quality_tier"] = ""
+    mdf["measurement_quality_tier"] = mdf["measurement_quality_tier"].fillna("").astype(str)
+
+    if "uncertainty_inflation_base" in mdf.columns:
+        mdf["uncertainty_inflation_base"] = pd.to_numeric(mdf["uncertainty_inflation_base"], errors="coerce").fillna(1.0)
+    else:
+        mdf["uncertainty_inflation_base"] = 1.0
+
+    if "measured_t1_us" in mdf.columns:
+        mdf["measured_t1_us"] = pd.to_numeric(mdf["measured_t1_us"], errors="coerce")
+    else:
+        mdf["measured_t1_us"] = np.nan
+    if "measured_t2_us" in mdf.columns:
+        mdf["measured_t2_us"] = pd.to_numeric(mdf["measured_t2_us"], errors="coerce")
+    else:
+        mdf["measured_t2_us"] = np.nan
+    if "source_name" in mdf.columns:
+        mdf["source_name"] = mdf["source_name"].fillna("").astype(str)
+    else:
+        mdf["source_name"] = ""
+    if "anchor_source_name" in mdf.columns:
+        mdf["anchor_source_name"] = mdf["anchor_source_name"].fillna("").astype(str)
+    else:
+        mdf["anchor_source_name"] = ""
+    if "is_synthetic_regularization" in mdf.columns:
+        if mdf["is_synthetic_regularization"].dtype != bool:
+            txt = mdf["is_synthetic_regularization"].fillna("").astype(str).str.strip().str.lower()
+            mdf["is_synthetic_regularization"] = txt.isin({"1", "true", "t", "yes", "y"})
+        mdf["is_synthetic_regularization"] = mdf["is_synthetic_regularization"].fillna(False).astype(bool)
+    else:
+        mdf["is_synthetic_regularization"] = False
+    if "anchor_row_index" in mdf.columns:
+        mdf["anchor_row_index"] = pd.to_numeric(mdf["anchor_row_index"], errors="coerce")
+    else:
+        mdf["anchor_row_index"] = np.nan
+
+    rows: List[Dict[str, object]] = []
+    grouped = mdf.groupby(id_col, sort=False, dropna=False)
+    for gid, g in grouped:
+        weights = pd.to_numeric(g["effective_weight"], errors="coerce").fillna(1.0).to_numpy(dtype=float)
+        t1 = pd.to_numeric(g["measured_t1_us"], errors="coerce").to_numpy(dtype=float)
+        t2 = pd.to_numeric(g["measured_t2_us"], errors="coerce").to_numpy(dtype=float)
+
+        t1_mean, t1_std, t1_count = _weighted_mean_std(t1, weights)
+        t2_mean, t2_std, t2_count = _weighted_mean_std(t2, weights)
+        eff_n = _effective_sample_size(weights)
+
+        src_w = g.groupby("source_name")["effective_weight"].sum().sort_values(ascending=False)
+        dominant_source = str(src_w.index[0]) if len(src_w) > 0 else ""
+        synthetic_mask = g["is_synthetic_regularization"].fillna(False).astype(bool).to_numpy(dtype=bool)
+        direct_mask = ~synthetic_mask
+        direct_count = int(np.sum(direct_mask))
+        synthetic_count = int(np.sum(synthetic_mask))
+
+        dominant_anchor_source = ""
+        if synthetic_count > 0:
+            synth_sources = g.loc[synthetic_mask, "anchor_source_name"].fillna("").astype(str)
+            if len(synth_sources) > 0:
+                anchor_counts = synth_sources.value_counts()
+                if len(anchor_counts) > 0:
+                    dominant_anchor_source = str(anchor_counts.index[0])
+        anchor_group_row_index = int(gid) if id_col == "row_index" else -1
+        if synthetic_count > 0 and "anchor_row_index" in g.columns:
+            anchor_rows = pd.to_numeric(g.loc[synthetic_mask, "anchor_row_index"], errors="coerce").dropna().astype(int)
+            if len(anchor_rows) > 0:
+                anchor_group_row_index = int(anchor_rows.value_counts().index[0])
+
+        tier = g["measurement_quality_tier"].fillna("").astype(str)
+        weak_frac = float(np.mean(tier == "weak_source")) if len(g) > 0 else 0.0
+        trace_frac = float(np.mean(tier == "tracefit_or_model")) if len(g) > 0 else 0.0
+        synth_frac = float(np.mean(synthetic_mask)) if len(g) > 0 else 0.0
+        direct_t1_count = int(np.sum(np.isfinite(t1) & direct_mask))
+        direct_t2_count = int(np.sum(np.isfinite(t2) & direct_mask))
+
+        rows.append(
+            {
+                id_col: int(gid),
+                "measured_t1_us": t1_mean,
+                "measured_t2_us": t2_mean,
+                "measured_t1_std_us": t1_std,
+                "measured_t2_std_us": t2_std,
+                "measured_t1_count": int(t1_count),
+                "measured_t2_count": int(t2_count),
+                "measurement_count": int(len(g)),
+                "measurement_effective_count": float(eff_n),
+                "measurement_confidence_weight": float(np.nanmean(weights)) if np.isfinite(weights).any() else 1.0,
+                "measurement_source_name": dominant_source,
+                "anchor_source_name": dominant_anchor_source,
+                "anchor_group_row_index": int(anchor_group_row_index),
+                "weak_source_fraction": weak_frac,
+                "tracefit_fraction": trace_frac,
+                "synthetic_fraction": synth_frac,
+                "direct_measurement_count": direct_count,
+                "synthetic_measurement_count": synthetic_count,
+                "direct_t1_count": direct_t1_count,
+                "direct_t2_count": direct_t2_count,
+                "uncertainty_inflation_base": float(np.nanmean(pd.to_numeric(g["uncertainty_inflation_base"], errors="coerce").fillna(1.0))),
+            }
+        )
+
+    agg = pd.DataFrame(rows)
+    return agg, id_col
 
 
 def _canonicalize_measured_by_source(
@@ -198,12 +436,17 @@ def _canonicalize_measured_by_source(
     sources: np.ndarray,
     min_rows: int,
     max_abs_shift_log10: float,
+    calibration_mask: Optional[np.ndarray] = None,
 ) -> Tuple[np.ndarray, Dict[str, object]]:
     out = values.copy()
     values_f = np.asarray(values, dtype=float)
     sources_s = pd.Series(sources).fillna("").astype(str).to_numpy(dtype=object)
 
     valid = np.isfinite(values_f) & (values_f > 0)
+    if calibration_mask is not None:
+        calib_mask = np.asarray(calibration_mask, dtype=bool)
+        if calib_mask.shape[0] == valid.shape[0]:
+            valid = valid & calib_mask
     if int(valid.sum()) == 0:
         return out, {
             "rows_used": 0,
@@ -247,6 +490,16 @@ def derive_targets(
     label_mode: str,
     source_calibration_min_rows: int,
     source_calibration_max_shift_log10: float,
+    repeated_weight_power: float,
+    synthetic_label_blend: float,
+    residual_transfer_enable: bool,
+    residual_transfer_k: int,
+    residual_transfer_tau: float,
+    residual_transfer_strength: float,
+    residual_transfer_max_abs_log10: float,
+    uncertainty_distance_scale: float,
+    uncertainty_distance_gain: float,
+    uncertainty_max_factor: float,
 ) -> Tuple[pd.DataFrame, Dict[str, object], str, Dict[str, object]]:
     proxy_t1 = base["t1_estimate_us"].to_numpy(dtype=float)
     proxy_t2 = base["t2_estimate_us"].to_numpy(dtype=float)
@@ -255,51 +508,59 @@ def derive_targets(
     measured_t2 = np.full(len(base), np.nan, dtype=float)
     measured_w = np.full(len(base), np.nan, dtype=float)
     measured_source = np.array(["" for _ in range(len(base))], dtype=object)
+    anchor_source = np.array(["" for _ in range(len(base))], dtype=object)
+    anchor_group_row_index = np.full(len(base), np.nan, dtype=float)
+    measured_eff_n = np.full(len(base), np.nan, dtype=float)
+    weak_source_fraction = np.zeros(len(base), dtype=float)
+    tracefit_fraction = np.zeros(len(base), dtype=float)
+    synthetic_fraction = np.zeros(len(base), dtype=float)
+    measurement_count = np.zeros(len(base), dtype=int)
+    direct_measurement_count = np.zeros(len(base), dtype=int)
+    synthetic_measurement_count = np.zeros(len(base), dtype=int)
+    direct_t1_count = np.zeros(len(base), dtype=int)
+    direct_t2_count = np.zeros(len(base), dtype=int)
+    uncertainty_base = np.ones(len(base), dtype=float)
 
     measured_rows = 0
-    if measurement_df is not None and len(measurement_df) > 0:
-        mdf = measurement_df.copy()
-        id_col: Optional[str] = None
+    aggregate_df, id_col = _build_measurement_aggregate(base, measurement_df)
+    if aggregate_df is not None and id_col is not None and len(aggregate_df) > 0:
+        m = aggregate_df.set_index(id_col)
+        if id_col == "row_index":
+            base_key = base["row_index"]
+        else:
+            base_key = base["design_id"]
 
-        if "row_index" in mdf.columns and np.isfinite(mdf["row_index"]).any():
-            id_col = "row_index"
-            mdf = mdf.dropna(subset=["row_index"])
-            mdf["row_index"] = mdf["row_index"].astype(int)
-            mdf = mdf.drop_duplicates(subset=["row_index"], keep="last")
-            m = mdf.set_index("row_index")
-            measured_t1 = base["row_index"].map(m.get("measured_t1_us")).to_numpy(dtype=float)
-            measured_t2 = base["row_index"].map(m.get("measured_t2_us")).to_numpy(dtype=float)
-            if "confidence_weight" in m.columns:
-                measured_w = base["row_index"].map(m.get("confidence_weight")).to_numpy(dtype=float)
-            if "source_name" in m.columns:
-                measured_source = base["row_index"].map(m.get("source_name")).fillna("").astype(str).to_numpy(dtype=object)
-        elif "design_id" in mdf.columns and np.isfinite(mdf["design_id"]).any():
-            id_col = "design_id"
-            mdf = mdf.dropna(subset=["design_id"])
-            mdf["design_id"] = mdf["design_id"].astype(int)
-            mdf = mdf.drop_duplicates(subset=["design_id"], keep="last")
-            m = mdf.set_index("design_id")
-            measured_t1 = base["design_id"].map(m.get("measured_t1_us")).to_numpy(dtype=float)
-            measured_t2 = base["design_id"].map(m.get("measured_t2_us")).to_numpy(dtype=float)
-            if "confidence_weight" in m.columns:
-                measured_w = base["design_id"].map(m.get("confidence_weight")).to_numpy(dtype=float)
-            if "source_name" in m.columns:
-                measured_source = base["design_id"].map(m.get("source_name")).fillna("").astype(str).to_numpy(dtype=object)
-
-        if id_col is not None:
-            measured_rows = int(np.sum(np.isfinite(measured_t1) | np.isfinite(measured_t2)))
+        measured_t1 = base_key.map(m.get("measured_t1_us")).to_numpy(dtype=float)
+        measured_t2 = base_key.map(m.get("measured_t2_us")).to_numpy(dtype=float)
+        measured_w = base_key.map(m.get("measurement_confidence_weight")).to_numpy(dtype=float)
+        measured_source = base_key.map(m.get("measurement_source_name")).fillna("").astype(str).to_numpy(dtype=object)
+        anchor_source = base_key.map(m.get("anchor_source_name")).fillna("").astype(str).to_numpy(dtype=object)
+        anchor_group_row_index = base_key.map(m.get("anchor_group_row_index")).to_numpy(dtype=float)
+        measured_eff_n = base_key.map(m.get("measurement_effective_count")).to_numpy(dtype=float)
+        weak_source_fraction = base_key.map(m.get("weak_source_fraction")).fillna(0.0).to_numpy(dtype=float)
+        tracefit_fraction = base_key.map(m.get("tracefit_fraction")).fillna(0.0).to_numpy(dtype=float)
+        synthetic_fraction = base_key.map(m.get("synthetic_fraction")).fillna(0.0).to_numpy(dtype=float)
+        measurement_count = base_key.map(m.get("measurement_count")).fillna(0).to_numpy(dtype=int)
+        direct_measurement_count = base_key.map(m.get("direct_measurement_count")).fillna(0).to_numpy(dtype=int)
+        synthetic_measurement_count = base_key.map(m.get("synthetic_measurement_count")).fillna(0).to_numpy(dtype=int)
+        direct_t1_count = base_key.map(m.get("direct_t1_count")).fillna(0).to_numpy(dtype=int)
+        direct_t2_count = base_key.map(m.get("direct_t2_count")).fillna(0).to_numpy(dtype=int)
+        uncertainty_base = base_key.map(m.get("uncertainty_inflation_base")).fillna(1.0).to_numpy(dtype=float)
+        measured_rows = int(np.sum(np.isfinite(measured_t1) | np.isfinite(measured_t2)))
 
     measured_t1_canon, t1_cal = _canonicalize_measured_by_source(
         values=measured_t1,
         sources=measured_source,
         min_rows=source_calibration_min_rows,
         max_abs_shift_log10=source_calibration_max_shift_log10,
+        calibration_mask=(direct_t1_count > 0),
     )
     measured_t2_canon, t2_cal = _canonicalize_measured_by_source(
         values=measured_t2,
         sources=measured_source,
         min_rows=source_calibration_min_rows,
         max_abs_shift_log10=source_calibration_max_shift_log10,
+        calibration_mask=(direct_t2_count > 0),
     )
 
     source_calibration = {
@@ -318,12 +579,101 @@ def derive_targets(
     if mode == "auto":
         mode = "hybrid" if measured_rows >= 30 else "proxy"
 
+    def apply_residual_transfer(
+        proxy_values: np.ndarray,
+        measured_values: np.ndarray,
+        sample_weight: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        corrected = proxy_values.copy()
+        blend = np.zeros(len(proxy_values), dtype=float)
+        min_dist = np.full(len(proxy_values), np.inf, dtype=float)
+        if not residual_transfer_enable:
+            return corrected, blend, min_dist
+
+        anchor_mask = (
+            np.isfinite(proxy_values)
+            & (proxy_values > 0)
+            & np.isfinite(measured_values)
+            & (measured_values > 0)
+        )
+        n_anchor = int(anchor_mask.sum())
+        if n_anchor < 2:
+            return corrected, blend, min_dist
+
+        feat = base.loc[:, FEATURE_COLS].to_numpy(dtype=float)
+        mu = np.nanmean(feat, axis=0)
+        sigma = np.nanstd(feat, axis=0)
+        sigma = np.where(sigma <= 1e-12, 1.0, sigma)
+        z_all = (feat - mu[None, :]) / sigma[None, :]
+
+        z_anchor = z_all[anchor_mask]
+        residual_anchor = np.log10(np.maximum(measured_values[anchor_mask], 1e-18)) - np.log10(np.maximum(proxy_values[anchor_mask], 1e-18))
+        anchor_weight = np.where(np.isfinite(sample_weight[anchor_mask]), sample_weight[anchor_mask], 1.0).astype(float)
+        anchor_weight = np.clip(anchor_weight, 1e-6, 1e6)
+
+        k_eff = int(max(1, min(int(residual_transfer_k), n_anchor)))
+        nn = NearestNeighbors(n_neighbors=k_eff, metric="euclidean")
+        nn.fit(z_anchor)
+        dist, idx = nn.kneighbors(z_all, n_neighbors=k_eff)
+
+        tau = float(max(residual_transfer_tau, 1e-6))
+        kernel = np.exp(-np.square(dist / tau))
+        anchor_w = anchor_weight[idx]
+        weighted = kernel * anchor_w
+        den = np.sum(weighted, axis=1) + 1e-12
+        res = np.sum(weighted * residual_anchor[idx], axis=1) / den
+        res = np.clip(res, -abs(residual_transfer_max_abs_log10), abs(residual_transfer_max_abs_log10))
+
+        local_strength = np.clip(np.sum(kernel, axis=1) / float(k_eff), 0.0, 1.0)
+        blend = np.clip(float(residual_transfer_strength) * local_strength, 0.0, 1.0)
+        blend[anchor_mask] = 0.0
+
+        corrected_log = np.log10(np.maximum(proxy_values, 1e-18)) + blend * res
+        corrected = np.power(10.0, corrected_log)
+        min_dist = dist[:, 0]
+        return corrected, blend, min_dist
+
+    proxy_t1_corrected, proxy_blend_t1, anchor_min_dist_t1 = apply_residual_transfer(
+        proxy_values=proxy_t1,
+        measured_values=measured_t1_canon,
+        sample_weight=np.where(np.isfinite(measured_w), measured_w, 1.0),
+    )
+    proxy_t2_corrected, proxy_blend_t2, anchor_min_dist_t2 = apply_residual_transfer(
+        proxy_values=proxy_t2,
+        measured_values=measured_t2_canon,
+        sample_weight=np.where(np.isfinite(measured_w), measured_w, 1.0),
+    )
+    proxy_transfer_blend = np.maximum(proxy_blend_t1, proxy_blend_t2)
+    anchor_min_dist = np.minimum(anchor_min_dist_t1, anchor_min_dist_t2)
+    if np.isfinite(anchor_min_dist).any():
+        dist_scale = float(uncertainty_distance_scale) if uncertainty_distance_scale > 0 else float(np.nanmedian(anchor_min_dist[np.isfinite(anchor_min_dist)]))
+    else:
+        dist_scale = 1.0
+    dist_scale = float(max(dist_scale, 1e-6))
+    dist_ratio = np.where(np.isfinite(anchor_min_dist), anchor_min_dist / dist_scale, 3.0)
+    dist_factor = 1.0 + float(max(0.0, uncertainty_distance_gain)) * np.clip(dist_ratio, 0.0, 3.0)
+    evidence_factor = np.maximum(
+        1.0,
+        uncertainty_base + 0.25 * weak_source_fraction + 0.60 * tracefit_fraction + 0.85 * synthetic_fraction,
+    )
+    uncertainty_inflation = np.clip(np.maximum(dist_factor, evidence_factor), 1.0, float(max(1.0, uncertainty_max_factor)))
+
     if mode == "proxy":
-        t1 = proxy_t1.copy()
-        t2 = proxy_t2.copy()
+        t1 = proxy_t1_corrected.copy()
+        t2 = proxy_t2_corrected.copy()
     elif mode == "hybrid":
-        t1 = np.where(np.isfinite(measured_t1_canon), measured_t1_canon, proxy_t1)
-        t2 = np.where(np.isfinite(measured_t2_canon), measured_t2_canon, proxy_t2)
+        synth_blend = float(np.clip(synthetic_label_blend, 0.0, 1.0))
+        direct_t1_mask = (direct_t1_count > 0) & np.isfinite(measured_t1_canon)
+        direct_t2_mask = (direct_t2_count > 0) & np.isfinite(measured_t2_canon)
+        synth_t1_mask = (~direct_t1_mask) & np.isfinite(measured_t1_canon)
+        synth_t2_mask = (~direct_t2_mask) & np.isfinite(measured_t2_canon)
+
+        t1 = proxy_t1_corrected.copy()
+        t2 = proxy_t2_corrected.copy()
+        t1[direct_t1_mask] = measured_t1_canon[direct_t1_mask]
+        t2[direct_t2_mask] = measured_t2_canon[direct_t2_mask]
+        t1[synth_t1_mask] = synth_blend * measured_t1_canon[synth_t1_mask] + (1.0 - synth_blend) * proxy_t1_corrected[synth_t1_mask]
+        t2[synth_t2_mask] = synth_blend * measured_t2_canon[synth_t2_mask] + (1.0 - synth_blend) * proxy_t2_corrected[synth_t2_mask]
     elif mode == "measured_only":
         t1 = measured_t1_canon.copy()
         t2 = measured_t2_canon.copy()
@@ -335,9 +685,32 @@ def derive_targets(
     out["t2_us"] = t2
     out["has_measured_t1"] = np.isfinite(measured_t1)
     out["has_measured_t2"] = np.isfinite(measured_t2)
-    out["measurement_confidence_weight"] = np.where(np.isfinite(measured_w), measured_w, 1.0)
+    out["has_direct_measured_t1"] = (direct_t1_count > 0) & np.isfinite(measured_t1)
+    out["has_direct_measured_t2"] = (direct_t2_count > 0) & np.isfinite(measured_t2)
+    out["has_synthetic_only_t1"] = out["has_measured_t1"] & (~out["has_direct_measured_t1"])
+    out["has_synthetic_only_t2"] = out["has_measured_t2"] & (~out["has_direct_measured_t2"])
+    base_measured_weight = np.where(np.isfinite(measured_w), measured_w, 1.0)
+    repeated_scale = np.power(np.maximum(np.where(np.isfinite(measured_eff_n), measured_eff_n, 1.0), 1.0), float(max(0.0, repeated_weight_power)))
+    quality_scale = np.exp(-(0.7 * weak_source_fraction + 1.3 * tracefit_fraction + 1.6 * synthetic_fraction))
+    out["measurement_confidence_weight"] = base_measured_weight * repeated_scale * quality_scale
     out["measurement_confidence_weight"] = np.clip(out["measurement_confidence_weight"], 1e-3, 1e3)
     out["measurement_source_name"] = pd.Series(measured_source).fillna("").astype(str).to_numpy(dtype=object)
+    out["anchor_source_name"] = pd.Series(anchor_source).fillna("").astype(str).to_numpy(dtype=object)
+    out["anchor_group_row_index"] = np.where(
+        np.isfinite(anchor_group_row_index),
+        anchor_group_row_index,
+        out["row_index"].to_numpy(dtype=float),
+    )
+    out["measurement_effective_count"] = np.where(np.isfinite(measured_eff_n), measured_eff_n, 0.0)
+    out["measurement_count"] = measurement_count
+    out["direct_measurement_count"] = direct_measurement_count
+    out["synthetic_measurement_count"] = synthetic_measurement_count
+    out["weak_source_fraction"] = weak_source_fraction
+    out["tracefit_fraction"] = tracefit_fraction
+    out["synthetic_measurement_fraction"] = synthetic_fraction
+    out["proxy_transfer_blend"] = proxy_transfer_blend
+    out["anchor_min_distance"] = anchor_min_dist
+    out["uncertainty_inflation_factor"] = uncertainty_inflation
 
     out = out.replace([np.inf, -np.inf], np.nan)
     out = out.dropna(subset=[*FEATURE_COLS, "t1_us", "t2_us"]).reset_index(drop=True)
@@ -348,9 +721,21 @@ def derive_targets(
         "mode_requested": label_mode,
         "mode_effective": mode,
         "measurement_rows_matched": measured_rows,
+        "measurement_rows_direct_matched": int(np.sum((direct_t1_count > 0) | (direct_t2_count > 0))),
+        "measurement_rows_synthetic_only_matched": int(np.sum(((direct_t1_count <= 0) & np.isfinite(measured_t1)) | ((direct_t2_count <= 0) & np.isfinite(measured_t2)))),
         "rows_final": int(len(out)),
         "rows_with_measured_t1": int(np.sum(np.isfinite(measured_t1))),
         "rows_with_measured_t2": int(np.sum(np.isfinite(measured_t2))),
+        "measurement_aggregate": {
+            "raw_rows": int(len(measurement_df)) if measurement_df is not None else 0,
+            "aggregated_rows": int(len(aggregate_df)) if aggregate_df is not None else 0,
+            "id_mode": id_col,
+            "mean_repeated_measurement_count": float(np.nanmean(out.loc[(out["has_measured_t1"] | out["has_measured_t2"]), "measurement_count"])) if int((out["has_measured_t1"] | out["has_measured_t2"]).sum()) > 0 else 0.0,
+            "mean_effective_sample_count": float(np.nanmean(out.loc[(out["has_measured_t1"] | out["has_measured_t2"]), "measurement_effective_count"])) if int((out["has_measured_t1"] | out["has_measured_t2"]).sum()) > 0 else 0.0,
+            "rows_with_direct_measurements": int((out["has_direct_measured_t1"] | out["has_direct_measured_t2"]).sum()),
+            "rows_with_synthetic_only_measurements": int((out["has_synthetic_only_t1"] | out["has_synthetic_only_t2"]).sum()),
+            "mean_synthetic_measurement_fraction": float(np.nanmean(out["synthetic_measurement_fraction"])) if len(out) > 0 else 0.0,
+        },
         "measurement_confidence_weight": {
             "count": int(measured_conf.shape[0]),
             "min": float(measured_conf.min()) if measured_conf.shape[0] > 0 else None,
@@ -362,7 +747,25 @@ def derive_targets(
             for k, v in out.loc[(out["has_measured_t1"] | out["has_measured_t2"]), "measurement_source_name"].value_counts().to_dict().items()
             if str(k)
         },
+        "anchor_source_counts": {
+            str(k): int(v)
+            for k, v in out.loc[(out["has_synthetic_only_t1"] | out["has_synthetic_only_t2"]), "anchor_source_name"].value_counts().to_dict().items()
+            if str(k)
+        },
         "source_calibration": source_calibration,
+        "residual_transfer": {
+            "enabled": bool(residual_transfer_enable),
+            "k_neighbors": int(residual_transfer_k),
+            "tau": float(residual_transfer_tau),
+            "strength": float(residual_transfer_strength),
+            "max_abs_log10": float(residual_transfer_max_abs_log10),
+            "synthetic_label_blend": float(np.clip(synthetic_label_blend, 0.0, 1.0)),
+            "uncertainty_distance_scale": float(dist_scale),
+            "uncertainty_distance_gain": float(max(0.0, uncertainty_distance_gain)),
+            "uncertainty_max_factor": float(max(1.0, uncertainty_max_factor)),
+            "mean_proxy_transfer_blend": float(np.nanmean(out["proxy_transfer_blend"])) if len(out) > 0 else 0.0,
+            "mean_uncertainty_inflation_factor": float(np.nanmean(out["uncertainty_inflation_factor"])) if len(out) > 0 else 1.0,
+        },
     }
     return out, stats, mode, source_calibration
 
@@ -385,6 +788,40 @@ def build_ood_mask(df: pd.DataFrame, width_q: float, height_q: float, gap_q: flo
         "gap_um_threshold": gap_thr,
     }
     return mask, thresholds
+
+
+def grouped_train_test_split(
+    positions: np.ndarray,
+    groups: np.ndarray,
+    test_size: float,
+    random_state: int,
+) -> Tuple[np.ndarray, np.ndarray]:
+    pos = np.asarray(positions, dtype=int)
+    grp = np.asarray(groups)
+    if pos.size == 0:
+        return np.asarray([], dtype=int), np.asarray([], dtype=int)
+
+    if grp.shape[0] != pos.shape[0]:
+        return train_test_split(pos, test_size=test_size, random_state=random_state, shuffle=True)
+
+    grp_s = pd.Series(grp).fillna(-1).astype(int).to_numpy(dtype=int)
+    uniq = np.unique(grp_s)
+    if uniq.size < 2:
+        return train_test_split(pos, test_size=test_size, random_state=random_state, shuffle=True)
+
+    rng = np.random.default_rng(int(random_state))
+    perm = rng.permutation(uniq.size)
+    uniq_perm = uniq[perm]
+
+    n_test_groups = int(max(1, round(float(test_size) * float(uniq_perm.size))))
+    n_test_groups = int(min(max(1, n_test_groups), max(1, uniq_perm.size - 1)))
+    test_groups = set(uniq_perm[:n_test_groups].tolist())
+    test_mask = np.array([g in test_groups for g in grp_s], dtype=bool)
+    test_pos = pos[test_mask]
+    train_pos = pos[~test_mask]
+    if train_pos.size == 0 or test_pos.size == 0:
+        return train_test_split(pos, test_size=test_size, random_state=random_state, shuffle=True)
+    return train_pos.astype(int), test_pos.astype(int)
 
 
 def apply_target_transform(y: np.ndarray, transform: Dict[str, float]) -> np.ndarray:
@@ -439,8 +876,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--measurement-weight-max", type=float, default=3.0)
     parser.add_argument("--source-calibration-min-rows", type=int, default=5)
     parser.add_argument("--source-calibration-max-shift-log10", type=float, default=1.0)
+    parser.add_argument("--repeated-weight-power", type=float, default=0.5, help="Diminishing-return exponent for repeated measurements")
+    parser.add_argument("--synthetic-label-blend", type=float, default=0.35, help="Blend factor for synthetic-only labels in hybrid mode")
+    parser.add_argument("--synthetic-regularization-weight", type=float, default=0.75, help="Sample-weight multiplier for synthetic-only rows")
+
+    parser.add_argument("--residual-transfer-disable", action="store_true", help="Disable anchor-conditioned residual transfer")
+    parser.add_argument("--residual-transfer-k", type=int, default=12)
+    parser.add_argument("--residual-transfer-tau", type=float, default=1.25)
+    parser.add_argument("--residual-transfer-strength", type=float, default=0.35)
+    parser.add_argument("--residual-transfer-max-abs-log10", type=float, default=0.35)
+    parser.add_argument("--uncertainty-distance-scale", type=float, default=0.0, help="If <=0, inferred from anchor distances")
+    parser.add_argument("--uncertainty-distance-gain", type=float, default=0.45)
+    parser.add_argument("--uncertainty-max-factor", type=float, default=2.50)
 
     parser.add_argument("--id-test-size", type=float, default=0.2)
+    parser.add_argument("--disable-grouped-anchor-split", action="store_true", help="Disable group-wise split by anchor/design IDs")
     parser.add_argument("--ood-width-quantile", type=float, default=0.95)
     parser.add_argument("--ood-height-quantile", type=float, default=0.95)
     parser.add_argument("--ood-gap-quantile", type=float, default=0.05)
@@ -472,8 +922,17 @@ def main() -> int:
     ensure_required_columns(df_raw, ["design_id", *FEATURE_COLS, "t1_estimate_us", "t2_estimate_us"])
 
     base = df_raw[["design_id", *FEATURE_COLS, "t1_estimate_us", "t2_estimate_us"]].copy()
-    base["row_index"] = df_raw.index.to_numpy()
+    if "row_index" in df_raw.columns:
+        row_idx = pd.to_numeric(df_raw["row_index"], errors="coerce")
+        if np.isfinite(row_idx).any():
+            base["row_index"] = row_idx.to_numpy(dtype=float)
+        else:
+            base["row_index"] = df_raw.index.to_numpy(dtype=float)
+    else:
+        base["row_index"] = df_raw.index.to_numpy(dtype=float)
+    base["row_index"] = pd.to_numeric(base["row_index"], errors="coerce")
     base = base.replace([np.inf, -np.inf], np.nan).dropna(subset=[*FEATURE_COLS, "t1_estimate_us", "t2_estimate_us"]).reset_index(drop=True)
+    base["row_index"] = base["row_index"].astype(int)
 
     measurement_df = load_measurement_df(args.measurement_csv)
     data, label_stats, mode_effective, source_calibration = derive_targets(
@@ -482,6 +941,16 @@ def main() -> int:
         args.label_mode,
         source_calibration_min_rows=args.source_calibration_min_rows,
         source_calibration_max_shift_log10=args.source_calibration_max_shift_log10,
+        repeated_weight_power=args.repeated_weight_power,
+        synthetic_label_blend=args.synthetic_label_blend,
+        residual_transfer_enable=not args.residual_transfer_disable,
+        residual_transfer_k=args.residual_transfer_k,
+        residual_transfer_tau=args.residual_transfer_tau,
+        residual_transfer_strength=args.residual_transfer_strength,
+        residual_transfer_max_abs_log10=args.residual_transfer_max_abs_log10,
+        uncertainty_distance_scale=args.uncertainty_distance_scale,
+        uncertainty_distance_gain=args.uncertainty_distance_gain,
+        uncertainty_max_factor=args.uncertainty_max_factor,
     )
     if len(data) < 1000:
         raise SystemExit("Not enough rows for reliable Phase 4 training")
@@ -499,12 +968,28 @@ def main() -> int:
     if len(in_pos) < 200 or len(ood_pos) < 100:
         raise SystemExit("Split too small; adjust OOD quantiles")
 
-    train_pos, id_test_pos = train_test_split(
-        in_pos,
-        test_size=args.id_test_size,
-        random_state=args.random_state,
-        shuffle=True,
-    )
+    if (not args.disable_grouped_anchor_split) and ("anchor_group_row_index" in data.columns):
+        groups_in = data.loc[in_pos, "anchor_group_row_index"].to_numpy(dtype=float)
+        train_pos, id_test_pos = grouped_train_test_split(
+            positions=in_pos,
+            groups=groups_in,
+            test_size=args.id_test_size,
+            random_state=args.random_state,
+        )
+    else:
+        train_pos, id_test_pos = train_test_split(
+            in_pos,
+            test_size=args.id_test_size,
+            random_state=args.random_state,
+            shuffle=True,
+        )
+    grouped_split_enabled = bool((not args.disable_grouped_anchor_split) and ("anchor_group_row_index" in data.columns))
+    if "anchor_group_row_index" in data.columns:
+        grp_all = pd.to_numeric(data["anchor_group_row_index"], errors="coerce").fillna(-1).astype(int).to_numpy(dtype=int)
+    else:
+        grp_all = data["row_index"].to_numpy(dtype=int)
+    train_group_count = int(np.unique(grp_all[train_pos]).size) if len(train_pos) > 0 else 0
+    id_group_count = int(np.unique(grp_all[id_test_pos]).size) if len(id_test_pos) > 0 else 0
 
     x_raw = data.loc[:, FEATURE_COLS].to_numpy(dtype=float)
     y_raw = data.loc[:, TARGET_COLS].to_numpy(dtype=float)
@@ -546,12 +1031,19 @@ def main() -> int:
 
         if target == "t1_us":
             has_measured = data["has_measured_t1"].to_numpy(dtype=bool)
+            has_direct = data["has_direct_measured_t1"].to_numpy(dtype=bool)
         else:
             has_measured = data["has_measured_t2"].to_numpy(dtype=bool)
+            has_direct = data["has_direct_measured_t2"].to_numpy(dtype=bool)
+        has_synth_only = has_measured & (~has_direct)
 
         conf = data["measurement_confidence_weight"].to_numpy(dtype=float)
         conf = np.clip(conf, args.measurement_weight_min, args.measurement_weight_max)
-        sample_weight_all = np.where(has_measured, args.measured_weight * conf, args.proxy_weight).astype(float)
+        proxy_blend = np.clip(data["proxy_transfer_blend"].to_numpy(dtype=float), 0.0, 1.0)
+        proxy_weight_all = args.proxy_weight * (1.0 + 0.50 * proxy_blend)
+        sample_weight_all = proxy_weight_all.astype(float)
+        sample_weight_all[has_synth_only] = float(args.synthetic_regularization_weight) * conf[has_synth_only]
+        sample_weight_all[has_direct] = float(args.measured_weight) * conf[has_direct]
         sample_weight_all = np.maximum(sample_weight_all, 1e-6)
         sample_weight_train = sample_weight_all[train_pos]
 
@@ -561,6 +1053,8 @@ def main() -> int:
             "train_max": float(np.max(sample_weight_train)),
             "train_mean": float(np.mean(sample_weight_train)),
             "train_fraction_measured": float(np.mean(has_measured[train_pos])),
+            "train_fraction_direct_measured": float(np.mean(has_direct[train_pos])),
+            "train_fraction_synthetic_only": float(np.mean(has_synth_only[train_pos])),
         }
 
         for q in QUANTILES:
@@ -578,12 +1072,31 @@ def main() -> int:
             model.fit(x_scaled[train_pos], y_train, sample_weight=sample_weight_train)
             models[key] = model
 
+    inflation_all = np.clip(data["uncertainty_inflation_factor"].to_numpy(dtype=float), 1.0, np.inf)
+
+    def apply_uncertainty_inflation(
+        q10: np.ndarray,
+        q50: np.ndarray,
+        q90: np.ndarray,
+        factors: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        f = np.clip(np.asarray(factors, dtype=float), 1.0, np.inf)
+        lo = np.maximum(q50 - q10, 1e-18)
+        hi = np.maximum(q90 - q50, 1e-18)
+        q10_i = q50 - lo * f
+        q90_i = q50 + hi * f
+        stacked = np.vstack([q10_i, q50, q90_i]).T
+        stacked.sort(axis=1)
+        return stacked[:, 0], stacked[:, 1], stacked[:, 2]
+
     def eval_split(positions: np.ndarray) -> Dict[str, Dict[str, float]]:
         out: Dict[str, Dict[str, float]] = {}
         x = x_scaled[positions]
+        infl = inflation_all[positions]
         for t_idx, target in enumerate(TARGET_COLS):
             y = y_eval_all[positions, t_idx]
             q10, q50, q90 = predict_target_quantiles(models, target, x, target_transforms[target])
+            q10, q50, q90 = apply_uncertainty_inflation(q10, q50, q90, infl)
             out[target] = quantile_metrics(y, q10, q50, q90)
         return out
 
@@ -677,6 +1190,8 @@ def main() -> int:
 
     q10_t1, q50_t1, q90_t1 = predict_target_quantiles(models, "t1_us", x_scaled, target_transforms["t1_us"])
     q10_t2, q50_t2, q90_t2 = predict_target_quantiles(models, "t2_us", x_scaled, target_transforms["t2_us"])
+    q10_t1, q50_t1, q90_t1 = apply_uncertainty_inflation(q10_t1, q50_t1, q90_t1, inflation_all)
+    q10_t2, q50_t2, q90_t2 = apply_uncertainty_inflation(q10_t2, q50_t2, q90_t2, inflation_all)
 
     width_t1 = q90_t1 - q10_t1
     width_t2 = q90_t2 - q10_t2
@@ -697,6 +1212,9 @@ def main() -> int:
             "pred_t2_p90_us": q90_t2,
             "uncertainty_width_t1": width_t1,
             "uncertainty_width_t2": width_t2,
+            "uncertainty_inflation_factor": inflation_all,
+            "proxy_transfer_blend": data["proxy_transfer_blend"].to_numpy(dtype=float),
+            "anchor_min_distance": data["anchor_min_distance"].to_numpy(dtype=float),
             "combined_uncertainty_score": combined_unc,
         }
     ).sort_values("combined_uncertainty_score", ascending=False)
@@ -706,6 +1224,9 @@ def main() -> int:
 
     feature_df.to_csv(outdir / "phase4_feature_risk_report.csv", index=False)
     uncertain_df.head(max(10, args.uncertain_top_n)).to_csv(outdir / "phase4_high_uncertainty_candidates.csv", index=False)
+
+    measured_anchor_mask = data["has_measured_t1"].to_numpy(dtype=bool) | data["has_measured_t2"].to_numpy(dtype=bool)
+    measured_anchor_features_scaled = x_scaled[measured_anchor_mask].astype(np.float32)
 
     bundle = {
         "version": 1,
@@ -726,6 +1247,18 @@ def main() -> int:
         "feature_ood_train_scaled": x_scaled[train_pos].astype(np.float32),
         "feature_ood_threshold": feature_ood_threshold,
         "feature_ood_quantile": float(args.feature_ood_quantile),
+        "measured_anchor_feature_scaled": measured_anchor_features_scaled,
+        "target_reference": {
+            "t1_us": y_eval_all[:, 0].astype(float).tolist(),
+            "t2_us": y_eval_all[:, 1].astype(float).tolist(),
+            "uncertainty_inflation_factor": inflation_all.astype(float).tolist(),
+        },
+        "uncertainty_inflation_config": {
+            "distance_scale": float(max(label_stats.get("residual_transfer", {}).get("uncertainty_distance_scale", args.uncertainty_distance_scale or 1.0), 1e-6)),
+            "distance_gain": float(label_stats.get("residual_transfer", {}).get("uncertainty_distance_gain", max(0.0, args.uncertainty_distance_gain))),
+            "max_factor": float(label_stats.get("residual_transfer", {}).get("uncertainty_max_factor", max(1.0, args.uncertainty_max_factor))),
+            "mean_train_factor": float(np.mean(inflation_all[train_pos])) if len(train_pos) > 0 else 1.0,
+        },
         "embedding_ref": embedding_ref,
         "feature_medians": {c: float(np.median(data.loc[train_pos, c])) for c in FEATURE_COLS},
         "width_reference": {
@@ -738,20 +1271,20 @@ def main() -> int:
         "sample_weight_config": {
             "proxy_weight": float(args.proxy_weight),
             "measured_weight": float(args.measured_weight),
+            "synthetic_regularization_weight": float(args.synthetic_regularization_weight),
             "measurement_weight_min": float(args.measurement_weight_min),
             "measurement_weight_max": float(args.measurement_weight_max),
+            "synthetic_label_blend": float(np.clip(args.synthetic_label_blend, 0.0, 1.0)),
             "target_sample_weight_stats": target_sample_weight_stats,
         },
         "label_mode_effective": mode_effective,
         "source_calibration": source_calibration,
-        "sample_weight_config": {
-            "proxy_weight": float(args.proxy_weight),
-            "measured_weight": float(args.measured_weight),
-            "measurement_weight_min": float(args.measurement_weight_min),
-            "measurement_weight_max": float(args.measurement_weight_max),
-            "target_sample_weight_stats": target_sample_weight_stats,
-        },
         "ood_thresholds": ood_thresholds,
+        "split_config": {
+            "grouped_anchor_split_enabled": grouped_split_enabled,
+            "train_group_count": train_group_count,
+            "id_test_group_count": id_group_count,
+        },
     }
     joblib.dump(bundle, outdir / "phase4_coherence_bundle.joblib")
 
@@ -773,6 +1306,10 @@ def main() -> int:
         "feature_ood_quantile": float(args.feature_ood_quantile),
         "embedding_ood_enabled": bool(embedding_ref.get("enabled", False)),
         "embedding_ood_threshold": float(embedding_ref.get("ood_threshold", np.nan)) if embedding_ref.get("enabled", False) else None,
+        "mean_train_uncertainty_inflation_factor": float(np.mean(inflation_all[train_pos])) if len(train_pos) > 0 else 1.0,
+        "grouped_anchor_split_enabled": grouped_split_enabled,
+        "train_group_count": train_group_count,
+        "id_test_group_count": id_group_count,
         "trained_at_utc": bundle["trained_at_utc"],
     }
     (outdir / "phase4_training_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")

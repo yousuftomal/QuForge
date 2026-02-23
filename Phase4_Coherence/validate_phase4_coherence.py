@@ -135,6 +135,9 @@ def load_measurement_df(path: Path) -> Optional[pd.DataFrame]:
         return None
 
     source_col = find_first_present(raw.columns, ["source_name", "source", "dataset_source"])
+    weight_col = find_first_present(raw.columns, ["confidence_weight", "sample_weight", "weight"])
+    quality_mul_col = find_first_present(raw.columns, ["quality_weight_multiplier"])
+    synthetic_col = find_first_present(raw.columns, ["is_synthetic_regularization"])
 
     keep_cols: List[str] = []
     if row_col is not None:
@@ -147,6 +150,12 @@ def load_measurement_df(path: Path) -> Optional[pd.DataFrame]:
         keep_cols.append(t2_col)
     if source_col is not None and source_col not in keep_cols:
         keep_cols.append(source_col)
+    if weight_col is not None and weight_col not in keep_cols:
+        keep_cols.append(weight_col)
+    if quality_mul_col is not None and quality_mul_col not in keep_cols:
+        keep_cols.append(quality_mul_col)
+    if synthetic_col is not None and synthetic_col not in keep_cols:
+        keep_cols.append(synthetic_col)
 
     out = raw[keep_cols].copy()
     if row_col is not None and row_col != "row_index":
@@ -159,6 +168,12 @@ def load_measurement_df(path: Path) -> Optional[pd.DataFrame]:
         out = out.rename(columns={t2_col: "measured_t2_us"})
     if source_col is not None and source_col != "source_name":
         out = out.rename(columns={source_col: "source_name"})
+    if weight_col is not None and weight_col != "confidence_weight":
+        out = out.rename(columns={weight_col: "confidence_weight"})
+    if quality_mul_col is not None and quality_mul_col != "quality_weight_multiplier":
+        out = out.rename(columns={quality_mul_col: "quality_weight_multiplier"})
+    if synthetic_col is not None and synthetic_col != "is_synthetic_regularization":
+        out = out.rename(columns={synthetic_col: "is_synthetic_regularization"})
 
     if "row_index" in out.columns:
         out["row_index"] = pd.to_numeric(out["row_index"], errors="coerce")
@@ -170,6 +185,17 @@ def load_measurement_df(path: Path) -> Optional[pd.DataFrame]:
         out["measured_t2_us"] = pd.to_numeric(out["measured_t2_us"], errors="coerce")
     if "source_name" in out.columns:
         out["source_name"] = out["source_name"].fillna("").astype(str)
+    if "confidence_weight" in out.columns:
+        out["confidence_weight"] = pd.to_numeric(out["confidence_weight"], errors="coerce")
+    if "quality_weight_multiplier" in out.columns:
+        out["quality_weight_multiplier"] = pd.to_numeric(out["quality_weight_multiplier"], errors="coerce")
+    if "is_synthetic_regularization" in out.columns:
+        if out["is_synthetic_regularization"].dtype != bool:
+            txt = out["is_synthetic_regularization"].fillna("").astype(str).str.strip().str.lower()
+            out["is_synthetic_regularization"] = txt.isin({"1", "true", "t", "yes", "y"})
+        out["is_synthetic_regularization"] = out["is_synthetic_regularization"].fillna(False).astype(bool)
+    else:
+        out["is_synthetic_regularization"] = False
 
     return out
 
@@ -202,6 +228,7 @@ def derive_targets(
     measurement_df: Optional[pd.DataFrame],
     mode: str,
     source_calibration: Optional[Dict[str, object]] = None,
+    synthetic_label_blend: float = 0.35,
 ) -> pd.DataFrame:
     proxy_t1 = base["t1_estimate_us"].to_numpy(dtype=float)
     proxy_t2 = base["t2_estimate_us"].to_numpy(dtype=float)
@@ -209,26 +236,91 @@ def derive_targets(
     measured_t1 = np.full(len(base), np.nan, dtype=float)
     measured_t2 = np.full(len(base), np.nan, dtype=float)
     measured_source = np.array(["" for _ in range(len(base))], dtype=object)
+    direct_t1_count = np.zeros(len(base), dtype=int)
+    direct_t2_count = np.zeros(len(base), dtype=int)
     if measurement_df is not None and len(measurement_df) > 0:
         mdf = measurement_df.copy()
         if "row_index" in mdf.columns and np.isfinite(mdf["row_index"]).any():
             mdf = mdf.dropna(subset=["row_index"])
             mdf["row_index"] = mdf["row_index"].astype(int)
-            mdf = mdf.drop_duplicates(subset=["row_index"], keep="last")
-            m = mdf.set_index("row_index")
-            measured_t1 = base["row_index"].map(m.get("measured_t1_us")).to_numpy(dtype=float)
-            measured_t2 = base["row_index"].map(m.get("measured_t2_us")).to_numpy(dtype=float)
-            if "source_name" in m.columns:
-                measured_source = base["row_index"].map(m.get("source_name")).fillna("").astype(str).to_numpy(dtype=object)
+            id_col = "row_index"
         elif "design_id" in mdf.columns and np.isfinite(mdf["design_id"]).any():
             mdf = mdf.dropna(subset=["design_id"])
             mdf["design_id"] = mdf["design_id"].astype(int)
-            mdf = mdf.drop_duplicates(subset=["design_id"], keep="last")
-            m = mdf.set_index("design_id")
-            measured_t1 = base["design_id"].map(m.get("measured_t1_us")).to_numpy(dtype=float)
-            measured_t2 = base["design_id"].map(m.get("measured_t2_us")).to_numpy(dtype=float)
-            if "source_name" in m.columns:
-                measured_source = base["design_id"].map(m.get("source_name")).fillna("").astype(str).to_numpy(dtype=object)
+            id_col = "design_id"
+        else:
+            id_col = None
+
+        if id_col is not None and len(mdf) > 0:
+            if "confidence_weight" in mdf.columns:
+                conf = pd.to_numeric(mdf["confidence_weight"], errors="coerce").fillna(1.0).clip(lower=1e-6)
+            else:
+                conf = pd.Series(np.ones(len(mdf), dtype=float), index=mdf.index)
+            if "quality_weight_multiplier" in mdf.columns:
+                qmul = pd.to_numeric(mdf["quality_weight_multiplier"], errors="coerce").fillna(1.0).clip(lower=0.05, upper=2.0)
+            else:
+                qmul = pd.Series(np.ones(len(mdf), dtype=float), index=mdf.index)
+            if "is_synthetic_regularization" in mdf.columns:
+                synthetic = mdf["is_synthetic_regularization"].fillna(False).astype(bool)
+            else:
+                synthetic = pd.Series(np.zeros(len(mdf), dtype=bool), index=mdf.index)
+
+            mdf["_w"] = conf.to_numpy(dtype=float) * qmul.to_numpy(dtype=float)
+            mdf["_is_synth"] = synthetic.to_numpy(dtype=bool)
+
+            agg_rows: List[Dict[str, object]] = []
+            for gid, g in mdf.groupby(id_col, sort=False):
+                w = pd.to_numeric(g["_w"], errors="coerce").fillna(1.0).to_numpy(dtype=float)
+                t1 = pd.to_numeric(g.get("measured_t1_us"), errors="coerce").to_numpy(dtype=float)
+                t2 = pd.to_numeric(g.get("measured_t2_us"), errors="coerce").to_numpy(dtype=float)
+                synth_mask = g["_is_synth"].fillna(False).astype(bool).to_numpy(dtype=bool)
+                direct_mask = ~synth_mask
+
+                def _wmean(v: np.ndarray, ww: np.ndarray) -> float:
+                    mask = np.isfinite(v) & np.isfinite(ww) & (ww > 0)
+                    if int(mask.sum()) == 0:
+                        return float("nan")
+                    vv = v[mask].astype(float)
+                    ww2 = ww[mask].astype(float)
+                    den = float(np.sum(ww2))
+                    if den <= 1e-18:
+                        return float("nan")
+                    return float(np.sum(vv * ww2) / den)
+
+                src_name = ""
+                if "source_name" in g.columns:
+                    src_w = (
+                        pd.DataFrame(
+                            {
+                                "src": g["source_name"].fillna("").astype(str),
+                                "w": w,
+                            }
+                        )
+                        .groupby("src", as_index=False)["w"]
+                        .sum()
+                        .sort_values("w", ascending=False)
+                    )
+                    if len(src_w) > 0:
+                        src_name = str(src_w.iloc[0]["src"])
+
+                agg_rows.append(
+                    {
+                        id_col: int(gid),
+                        "measured_t1_us": _wmean(t1, w),
+                        "measured_t2_us": _wmean(t2, w),
+                        "source_name": src_name,
+                        "direct_t1_count": int(np.sum(np.isfinite(t1) & direct_mask)),
+                        "direct_t2_count": int(np.sum(np.isfinite(t2) & direct_mask)),
+                    }
+                )
+
+            m = pd.DataFrame(agg_rows).set_index(id_col)
+            key = base[id_col]
+            measured_t1 = key.map(m.get("measured_t1_us")).to_numpy(dtype=float)
+            measured_t2 = key.map(m.get("measured_t2_us")).to_numpy(dtype=float)
+            measured_source = key.map(m.get("source_name")).fillna("").astype(str).to_numpy(dtype=object)
+            direct_t1_count = key.map(m.get("direct_t1_count")).fillna(0).to_numpy(dtype=int)
+            direct_t2_count = key.map(m.get("direct_t2_count")).fillna(0).to_numpy(dtype=int)
 
     measured_t1 = _apply_source_offsets(measured_t1, measured_source, "t1_us", source_calibration)
     measured_t2 = _apply_source_offsets(measured_t2, measured_source, "t2_us", source_calibration)
@@ -237,8 +329,18 @@ def derive_targets(
         t1 = proxy_t1
         t2 = proxy_t2
     elif mode == "hybrid":
-        t1 = np.where(np.isfinite(measured_t1), measured_t1, proxy_t1)
-        t2 = np.where(np.isfinite(measured_t2), measured_t2, proxy_t2)
+        blend = float(np.clip(synthetic_label_blend, 0.0, 1.0))
+        direct_t1 = (direct_t1_count > 0) & np.isfinite(measured_t1)
+        direct_t2 = (direct_t2_count > 0) & np.isfinite(measured_t2)
+        synth_t1 = (~direct_t1) & np.isfinite(measured_t1)
+        synth_t2 = (~direct_t2) & np.isfinite(measured_t2)
+
+        t1 = proxy_t1.copy()
+        t2 = proxy_t2.copy()
+        t1[direct_t1] = measured_t1[direct_t1]
+        t2[direct_t2] = measured_t2[direct_t2]
+        t1[synth_t1] = blend * measured_t1[synth_t1] + (1.0 - blend) * proxy_t1[synth_t1]
+        t2[synth_t2] = blend * measured_t2[synth_t2] + (1.0 - blend) * proxy_t2[synth_t2]
     elif mode == "measured_only":
         t1 = measured_t1
         t2 = measured_t2
@@ -302,13 +404,30 @@ def main() -> int:
         raise SystemExit(f"Missing columns: {missing}")
 
     base = df_raw[["design_id", *feature_cols, "t1_estimate_us", "t2_estimate_us"]].copy()
-    base["row_index"] = df_raw.index.to_numpy()
+    if "row_index" in df_raw.columns:
+        row_idx = pd.to_numeric(df_raw["row_index"], errors="coerce")
+        if np.isfinite(row_idx).any():
+            base["row_index"] = row_idx.to_numpy(dtype=float)
+        else:
+            base["row_index"] = df_raw.index.to_numpy(dtype=float)
+    else:
+        base["row_index"] = df_raw.index.to_numpy(dtype=float)
+    base["row_index"] = pd.to_numeric(base["row_index"], errors="coerce")
     base = base.replace([np.inf, -np.inf], np.nan).dropna()
+    base["row_index"] = base["row_index"].astype(int)
 
     label_mode = str(bundle.get("label_mode_effective", "proxy"))
     source_calibration = bundle.get("source_calibration", {})
     measurement_df = load_measurement_df(args.measurement_csv)
-    data = derive_targets(base, measurement_df, label_mode, source_calibration=source_calibration)
+    sw_cfg = bundle.get("sample_weight_config", {})
+    synthetic_label_blend = float(sw_cfg.get("synthetic_label_blend", 0.35)) if isinstance(sw_cfg, dict) else 0.35
+    data = derive_targets(
+        base,
+        measurement_df,
+        label_mode,
+        source_calibration=source_calibration,
+        synthetic_label_blend=synthetic_label_blend,
+    )
 
     frame = data.set_index("row_index")
     missing_rows = [idx for idx in row_index_all if idx not in frame.index]
@@ -320,10 +439,21 @@ def main() -> int:
     y_raw = data.loc[:, target_cols].to_numpy(dtype=float)
 
     y_eval = np.zeros_like(y_raw)
-    for i, target in enumerate(target_cols):
-        lo = float(target_transforms[target]["clip_low"])
-        hi = float(target_transforms[target]["clip_high"])
-        y_eval[:, i] = np.clip(y_raw[:, i], lo, hi)
+    target_ref = bundle.get("target_reference", {})
+    if isinstance(target_ref, dict) and all(k in target_ref for k in ("t1_us", "t2_us")):
+        try:
+            y_eval[:, 0] = np.asarray(target_ref["t1_us"], dtype=float)
+            y_eval[:, 1] = np.asarray(target_ref["t2_us"], dtype=float)
+        except Exception:
+            for i, target in enumerate(target_cols):
+                lo = float(target_transforms[target]["clip_low"])
+                hi = float(target_transforms[target]["clip_high"])
+                y_eval[:, i] = np.clip(y_raw[:, i], lo, hi)
+    else:
+        for i, target in enumerate(target_cols):
+            lo = float(target_transforms[target]["clip_low"])
+            hi = float(target_transforms[target]["clip_high"])
+            y_eval[:, i] = np.clip(y_raw[:, i], lo, hi)
 
     x_mean = np.asarray(bundle["scaler_mean"], dtype=np.float32)
     x_scale = np.asarray(bundle["scaler_scale"], dtype=np.float32)
@@ -335,12 +465,36 @@ def main() -> int:
 
     models = bundle["models"]
 
+    inflation_ref = np.ones(len(data), dtype=float)
+    if isinstance(target_ref, dict) and "uncertainty_inflation_factor" in target_ref:
+        try:
+            inflation_ref = np.clip(np.asarray(target_ref["uncertainty_inflation_factor"], dtype=float), 1.0, np.inf)
+        except Exception:
+            inflation_ref = np.ones(len(data), dtype=float)
+
+    def apply_uncertainty_inflation(
+        q10: np.ndarray,
+        q50: np.ndarray,
+        q90: np.ndarray,
+        factors: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        f = np.clip(np.asarray(factors, dtype=float), 1.0, np.inf)
+        lo = np.maximum(q50 - q10, 1e-18)
+        hi = np.maximum(q90 - q50, 1e-18)
+        q10_i = q50 - lo * f
+        q90_i = q50 + hi * f
+        stacked = np.vstack([q10_i, q50, q90_i]).T
+        stacked.sort(axis=1)
+        return stacked[:, 0], stacked[:, 1], stacked[:, 2]
+
     def eval_split(positions: np.ndarray) -> Dict[str, Dict[str, float]]:
         out: Dict[str, Dict[str, float]] = {}
         x = x_scaled[positions]
+        infl = inflation_ref[positions]
         for t_idx, target in enumerate(target_cols):
             y = y_eval[positions, t_idx]
             q10, q50, q90 = predict_target_quantiles(models, target, x, target_transforms[target])
+            q10, q50, q90 = apply_uncertainty_inflation(q10, q50, q90, infl)
             out[target] = quantile_metrics(y, q10, q50, q90)
         return out
 

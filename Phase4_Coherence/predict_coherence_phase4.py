@@ -99,6 +99,20 @@ def apply_source_profile_scalar(
     return float(arr[0]), float(arr[1]), float(arr[2])
 
 
+def apply_quantile_inflation_scalar(
+    q10: float,
+    q50: float,
+    q90: float,
+    factor: float,
+) -> Tuple[float, float, float]:
+    f = float(max(1.0, factor))
+    lo = max(float(q50) - float(q10), 1e-18)
+    hi = max(float(q90) - float(q50), 1e-18)
+    arr = np.array([q50 - lo * f, q50, q50 + hi * f], dtype=float)
+    arr.sort()
+    return float(arr[0]), float(arr[1]), float(arr[2])
+
+
 def parse_args() -> argparse.Namespace:
     root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description="Predict coherence with Phase 4 model")
@@ -275,6 +289,24 @@ def main() -> int:
         uncertainty_scale=float(args.source_uncertainty_scale),
     )
 
+    anchor_distance = None
+    inflation_factor = 1.0
+    unc_cfg = bundle.get("uncertainty_inflation_config", {})
+    measured_anchor_ref = np.asarray(bundle.get("measured_anchor_feature_scaled", np.empty((0, len(feature_cols)))), dtype=np.float32)
+    if measured_anchor_ref.ndim == 2 and measured_anchor_ref.shape[0] > 0 and measured_anchor_ref.shape[1] == x_scaled.shape[1]:
+        nn_anchor = NearestNeighbors(n_neighbors=1, metric="euclidean")
+        nn_anchor.fit(measured_anchor_ref)
+        dist_anchor, _ = nn_anchor.kneighbors(x_scaled, n_neighbors=1)
+        anchor_distance = float(dist_anchor[0, 0])
+        dist_scale = float(max(float(unc_cfg.get("distance_scale", 1.0)), 1e-6))
+        dist_gain = float(max(0.0, float(unc_cfg.get("distance_gain", 0.0))))
+        max_factor = float(max(1.0, float(unc_cfg.get("max_factor", 2.0))))
+        inflation_factor = 1.0 + dist_gain * min(anchor_distance / dist_scale, 3.0)
+        inflation_factor = float(np.clip(inflation_factor, 1.0, max_factor))
+
+    t1_p10, t1_p50, t1_p90 = apply_quantile_inflation_scalar(t1_p10, t1_p50, t1_p90, inflation_factor)
+    t2_p10, t2_p50, t2_p90 = apply_quantile_inflation_scalar(t2_p10, t2_p50, t2_p90, inflation_factor)
+
     feat_ref = np.asarray(bundle["feature_ood_train_scaled"], dtype=np.float32)
     feat_thr = float(bundle["feature_ood_threshold"])
     feat_nn = NearestNeighbors(n_neighbors=1, metric="euclidean")
@@ -350,6 +382,8 @@ def main() -> int:
             "embedding_threshold": float(emb_ref.get("ood_threshold", np.nan)) if bool(emb_ref.get("enabled", False)) else None,
             "embedding_ood": embedding_ood,
             "combined_ood": combined_ood,
+            "measured_anchor_feature_distance": anchor_distance,
+            "uncertainty_inflation_factor": inflation_factor,
         },
         "confidence": confidence,
         "phase1_fill_used": phase1_filled,
