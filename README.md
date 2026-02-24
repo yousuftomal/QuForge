@@ -44,12 +44,13 @@ It is not currently claiming:
 | `Phase6_Reliability/` | Reliability variant comparisons and stress tests |
 | `Phase7_Evidence/` | Multi-seed evidence hardening, holdout runs, and figure generation |
 
-## Current Run Snapshot (Latest Strict Rerun)
+## Current Run Snapshot (Latest Strict Protocol)
 
-The latest strict rerun used:
+The latest strict run used:
 - geometry enabled,
 - Palace required (`--no-palace-fallback`),
-- no fitted/model public curves by default in mapping.
+- conservative public mapping with fitted/model curves excluded,
+- design-disjoint source holdout with leakage audit.
 
 ### Data and Coverage
 
@@ -57,25 +58,29 @@ The latest strict rerun used:
 |---|---|
 | Single-device dataset rows | `4142` |
 | Coupled-device dataset rows | `80000` |
-| Single dataset source | Palace-derived (`palace_cached`) |
-| Unique referenced GDS | `1027` |
-| Strict mapped public measured rows | `5` |
-| Rejected fitted/model rows in strict map | `1240` |
+| Strict mapped measured rows (direct) | `26` |
+| Augmented measured rows (direct + synthetic) | `170` |
+| Hybrid matched supervision rows | `150` |
+| Eligible measured sources after strict mapping | `2` |
+| Unique mapped designs | `6` |
 
 Source-provenance note:
-- Canonical public ingestion includes `Zenodo:18045662` (1218 rows), `DataGov:NIST:mds2-3027` (21), `SQuADDS` (5), and `Zenodo:15364358_tracefit` (1).
-- After strict fitted/model-curve rejection and conservative mapping, only `SQuADDS` contributes geometry-linked supervised rows (`5`); all other sources contribute `0` mapped rows.
+- Canonical ingestion includes `Zenodo:18045662`, `DataGov:NIST:mds2-3027`, `SQuADDS`, and `Zenodo:15364358_tracefit`.
+- Under strict mapping and fitted/model-curve exclusion, retained geometry-linked supervised rows are:
+  - `SQuADDS`: `5` rows with `T1/T2`
+  - `DataGov:NIST:mds2-3027`: `21` rows with `T2` only
+  - large Zenodo records: `0` geometry-linked supervised rows after strict filtering/mapping.
 
 ### Reliability/Evidence Highlights
 
 | Metric | Result |
 |---|---|
-| Phase 5 targets/candidates/selected | `24 / 192 / 30` |
-| Phase 6 primary variant (single-seed summary) | `proxy_baseline` |
-| Phase 7 10-seed top by mean reliability rank | `hybrid_full_conf` (`rank_mean=1.6`, `top1_count=5`) |
-| Phase 7 source holdout rows used | `5` |
-| Phase 7 source holdout `t1` MAE | `23.4065 us` |
-| Phase 7 source holdout `t2(log10)` MAE | `1.4001` |
+| Phase 5 targets/candidates/selected | `24 / 192 / 26` |
+| Phase 7 top variant by 10-seed reliability rank | `hybrid_high_trust` (`rank_mean=1.4`, `top1_count=6`) |
+| Holdout leakage overlap (max) | `0` |
+| Source holdout `SQuADDS` `T1` MAE | `23.41 us` (95% CI `[11.52, 30.57]`) |
+| Source holdout `SQuADDS` `T2(log10)` MAE | `1.40` (95% CI `[0.76, 1.99]`) |
+| Source holdout `DataGov:NIST:mds2-3027` `T2(log10)` MAE | `0.45` (95% CI `[0.37, 0.53]`) |
 
 Interpretation:
 - Internal ranking behavior is meaningful and reproducible.
@@ -153,25 +158,28 @@ Dataset\.venv310\Scripts\python Dataset\generate_data.py --workdir Dataset --sam
 Run in order:
 
 ```powershell
-Dataset\.venv310\Scripts\python Dataset\generate_data.py --workdir Dataset --sampling-mode random --geometry-samples 1200 --junction-samples 10 --target-single-rows 10000 --max-pairs 5000 --gmsh-verbosity 0 --mesh-lc-min-um 30 --mesh-lc-max-um 120 --mesh-optimize-threshold 0.45 --no-palace-fallback
-Dataset\.venv310\Scripts\python Phase4_5_PublicData\build_public_canonical_dataset.py
-Dataset\.venv310\Scripts\python Phase4_5_PublicData\augment_large_raw_sources.py --input-csv Dataset\public_sources\silver\public_measurements_canonical.csv --output-csv Dataset\public_sources\silver\public_measurements_canonical.csv
-Dataset\.venv310\Scripts\python Phase4_5_PublicData\map_public_to_internal.py --max-distance 1.6 --min-confidence 0.30
-Dataset\.venv310\Scripts\python Phase1_Surrogate\train_surrogate.py --n-estimators 250 --max-depth 32
-Dataset\.venv310\Scripts\python Phase2_Embedding\train_phase2_embedding_nn.py
-Dataset\.venv310\Scripts\python Phase2_Embedding\validate_phase2_embedding_nn.py
-Dataset\.venv310\Scripts\python Phase3_InverseDesign\validate_phase3.py --max-queries-per-split 40
-Dataset\.venv310\Scripts\python Phase4_Coherence\train_phase4_coherence.py --label-mode hybrid --measurement-csv Dataset\measurement_dataset_public_bootstrap.csv --measured-weight 1.0 --proxy-weight 1.0
-Dataset\.venv310\Scripts\python Phase4_Coherence\validate_phase4_coherence.py --measurement-csv Dataset\measurement_dataset_public_bootstrap.csv
-Dataset\.venv310\Scripts\python Phase5_ClosedLoop\run_phase5_closed_loop.py
-Dataset\.venv310\Scripts\python Phase6_Reliability\run_phase6_reliability.py
-Dataset\.venv310\Scripts\python Phase7_Evidence\run_phase7_evidence.py --measurement-csv Dataset\measurement_dataset_public_bootstrap.csv --output-dir Phase7_Evidence\artifacts_large_sweep --seeds 42,123,777,1001,1002,1003,1004,1005,1006,1007
+Dataset\.venv310\Scripts\Activate.ps1
+python Dataset\generate_data.py --workdir Dataset --sampling-mode random --geometry-samples 1200 --junction-samples 10 --target-single-rows 10000 --max-pairs 5000 --gmsh-verbosity 0 --mesh-lc-min-um 30 --mesh-lc-max-um 120 --mesh-optimize-threshold 0.45 --no-palace-fallback
+python Phase4_5_PublicData\build_public_canonical_dataset.py
+python Phase4_5_PublicData\augment_large_raw_sources.py --input-csv Dataset\public_sources\silver\public_measurements_canonical.csv --output-csv Dataset\public_sources\silver\public_measurements_canonical.csv
+python Phase4_5_PublicData\map_public_to_internal.py --max-distance 1.6 --min-confidence 0.30
+python Phase4_5_PublicData\augment_anchor_conditioned_regularization.py --measurement-csv Dataset\measurement_dataset_public_bootstrap.csv --output-csv Dataset\measurement_dataset_public_bootstrap_augmented.csv --report-json Dataset\measurement_dataset_public_bootstrap_augmented.report.json --neighbors-per-anchor 24
+python Phase1_Surrogate\train_surrogate.py --n-estimators 250 --max-depth 32
+python Phase2_Embedding\train_phase2_embedding_nn.py --temperature 0.07
+python Phase2_Embedding\validate_phase2_embedding_nn.py
+python Phase3_InverseDesign\validate_phase3.py --max-queries-per-split 40
+python Phase4_Coherence\train_phase4_coherence.py --label-mode hybrid --measurement-csv Dataset\measurement_dataset_public_bootstrap_augmented.csv --measured-weight 1.0 --proxy-weight 1.0 --synthetic-label-blend 0.35 --synthetic-regularization-weight 0.75 --repeated-weight-power 0.5
+python Phase4_Coherence\validate_phase4_coherence.py --measurement-csv Dataset\measurement_dataset_public_bootstrap_augmented.csv
+python Phase5_ClosedLoop\run_phase5_closed_loop.py
+python Phase6_Reliability\run_phase6_reliability.py --measurement-csv Dataset\measurement_dataset_public_bootstrap_augmented.csv
+python Phase7_Evidence\run_phase7_evidence.py --measurement-csv Dataset\measurement_dataset_public_bootstrap_augmented.csv --output-dir Phase7_Evidence\artifacts_large_sweep --seeds 42,123,777,1001,1002,1003,1004,1005,1006,1007 --holdout-mode design_disjoint --holdout-min-sources 2
 # Figure scripts keep "publication" in filename for historical compatibility.
-Dataset\.venv310\Scripts\python Phase7_Evidence\generate_publication_figures.py --input-dir Phase7_Evidence\artifacts_large_sweep --output-dir Phase7_Evidence\artifacts_large_sweep\figures
-Dataset\.venv310\Scripts\python Phase7_Evidence\generate_extended_publication_figures.py --phase7-dir Phase7_Evidence\artifacts_large_sweep --phase6-dir Phase6_Reliability\artifacts --phase5-dir Phase5_ClosedLoop\artifacts --single-csv Dataset\final_dataset_single.csv --output-dir Phase7_Evidence\artifacts_large_sweep\figures
+python Phase7_Evidence\generate_publication_figures.py --input-dir Phase7_Evidence\artifacts_large_sweep --output-dir Phase7_Evidence\artifacts_large_sweep\figures
+python Phase7_Evidence\generate_extended_publication_figures.py --phase7-dir Phase7_Evidence\artifacts_large_sweep --phase6-dir Phase6_Reliability\artifacts --phase5-dir Phase5_ClosedLoop\artifacts --single-csv Dataset\final_dataset_single.csv --output-dir Phase7_Evidence\artifacts_large_sweep\figures
 ```
 
 Fixed evidence seed set: `42,123,777,1001,1002,1003,1004,1005,1006,1007`.
+
 
 ## Environment Notes
 
